@@ -1,0 +1,18 @@
+ARIES is set up in namespace {{ .Release.Namespace }}.
+
+The chart installs only identities and permissions. ARIES itself creates the
+harness, sandbox and tool bridge pods for each run, and removes them afterwards.
+{{- if .Values.bridge.enabled }}
+
+The bridge pod runs as ServiceAccount {{ include "aries.bridge.fullname" . }}. Profiles select it with
+
+  "bridge": {"deployment": {"backend": "kubernetes", "kubernetes": {"service_account": "{{ include "aries.bridge.fullname" . }}"}}}
+{{- end }}
+
+The runner is not in the cluster. Set up its host from your machine with
+
+  go run ./k8s/setup/aries-setup setup_runner
+
+then, on that host,
+
+  cd ~/aries && ./bin/aries profiles/hermes-tb2-fix-git-deepseek-k8s-pods.json

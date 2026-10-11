@@ -1,0 +1,10 @@
+# Local cluster (kind/minikube).
+#
+#   helm upgrade --install aries ./k8s/aries --namespace aries --create-namespace \
+#     -f ./k8s/aries/values-local.yaml
+#
+# Side-load the images a profile names (kind load docker-image ...), or map them
+# to a registry the node can pull from with the profile's `images` block.
+
+registry:
+  create: false

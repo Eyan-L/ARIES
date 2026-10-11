@@ -79,8 +79,10 @@ network and bridge service with independent per-sandbox sessions; see
 
 Deployment independence is a design requirement, not a claim that any backend can
 already be substituted. Placements must provide the component's required
-capabilities and safety guarantees. The current Docker provider and its remaining
-portability limits are described in [Docker implementation](implementation/docker.md).
+capabilities and safety guarantees. The Docker provider and its remaining
+portability limits are described in [Docker implementation](implementation/docker.md);
+the Kubernetes provider and the constraints it adds are in
+[Kubernetes implementation](implementation/kubernetes.md).
 Profile syntax stays in the [deployment guide](configuration.md#deployment-configuration).
 
 ## Protocol independence

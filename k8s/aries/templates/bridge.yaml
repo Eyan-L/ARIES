@@ -1,0 +1,50 @@
+{{- /*
+Identity of the tool bridge. ARIES creates one bridge pod per run and removes
+it afterwards, so the chart ships no bridge workload: only the ServiceAccount
+that pod runs as, and the Role letting it exec into sandbox pods in this
+namespace. Profiles name the account in bridge.deployment.kubernetes.service_account.
+*/ -}}
+{{- if .Values.bridge.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "aries.bridge.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aries.labels" . | nindent 4 }}
+---
+# The bridge's only cluster access: read a sandbox pod to check it is the one
+# a grant names, and exec into it to run tool calls. It cannot create, delete
+# or modify anything, so a compromised bridge cannot stand up workloads or
+# tamper with a sandbox's lifecycle.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "aries.bridge.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aries.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "aries.bridge.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aries.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "aries.bridge.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "aries.bridge.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

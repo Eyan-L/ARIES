@@ -93,3 +93,46 @@ func TestManagedBridgePlacementValidation(t *testing.T) {
 		t.Fatal("process accepted for harness")
 	}
 }
+
+func TestKubernetesDeploymentNormalization(t *testing.T) {
+	kubernetes := func(k KubernetesDeploymentConfig) DeploymentConfig {
+		return DeploymentConfig{Backend: "kubernetes", Kubernetes: &k}
+	}
+	cfg := Config{}
+	cfg.Harness.Deployment = DeploymentConfig{Backend: "kubernetes"}
+	cfg.Sandbox.Deployment = kubernetes(KubernetesDeploymentConfig{PodCIDR: "192.168.0.0/16", ServiceCIDR: "10.96.0.0/12"})
+	cfg.Bridge.Deployment = kubernetes(KubernetesDeploymentConfig{Images: map[string]string{"aries-bridge": "registry.test/aries-bridge"}})
+	if err := cfg.NormalizeDeployment(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Harness.Deployment.Kubernetes.Namespace != "aries" || cfg.Sandbox.Deployment.Kubernetes.Namespace != "aries" || cfg.Bridge.Deployment.Kubernetes.ServiceAccount != "aries-bridge" {
+		t.Fatalf("defaults = %+v %+v %+v", cfg.Harness.Deployment.Kubernetes, cfg.Sandbox.Deployment.Kubernetes, cfg.Bridge.Deployment.Kubernetes)
+	}
+	if err := cfg.NormalizeDeployment(); err != nil {
+		t.Fatalf("normalization is not idempotent: %v", err)
+	}
+	for name, test := range map[string]struct {
+		mutate func(*Config)
+		want   string
+	}{
+		"mixed backends":  {func(c *Config) { c.Bridge.Deployment = DeploymentConfig{Backend: "docker"} }, "all use the kubernetes deployment backend"},
+		"namespace":       {func(c *Config) { c.Harness.Deployment = kubernetes(KubernetesDeploymentConfig{Namespace: "other"}) }, "must match sandbox.deployment.kubernetes.namespace"},
+		"harness CIDR":    {func(c *Config) { c.Harness.Deployment = kubernetes(KubernetesDeploymentConfig{PodCIDR: "10.0.0.0/8"}) }, "apply only to sandbox.deployment"},
+		"sandbox account": {func(c *Config) { c.Sandbox.Deployment = kubernetes(KubernetesDeploymentConfig{ServiceAccount: "x"}) }, "applies only to bridge.deployment"},
+		"malformed CIDR":  {func(c *Config) { c.Sandbox.Deployment = kubernetes(KubernetesDeploymentConfig{PodCIDR: "not-a-cidr"}) }, "is not a CIDR"},
+		"docker options":  {func(c *Config) { c.Sandbox.Deployment.Docker = &DockerDeploymentConfig{} }, "does not apply to backend kubernetes"},
+		"kubernetes on docker": {func(c *Config) {
+			c.Harness.Deployment, c.Bridge.Deployment = DeploymentConfig{}, DeploymentConfig{}
+			c.Sandbox.Deployment = DeploymentConfig{Backend: "docker", Kubernetes: &KubernetesDeploymentConfig{}}
+		}, "does not apply to backend docker"},
+	} {
+		c := Config{}
+		c.Harness.Deployment = DeploymentConfig{Backend: "kubernetes"}
+		c.Sandbox.Deployment = DeploymentConfig{Backend: "kubernetes"}
+		c.Bridge.Deployment = DeploymentConfig{Backend: "kubernetes"}
+		test.mutate(&c)
+		if err := c.NormalizeDeployment(); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, test.want)
+		}
+	}
+}

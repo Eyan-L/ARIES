@@ -19,11 +19,20 @@ import (
 const (
 	artifactDirectoryMode = 0o700
 	artifactFileMode      = 0o600
-	indexSchemaVersion    = 4
-	maxCoverageEntries    = 32
+	// Version 5 changed the meaning of `second` in resources.jsonl, and of the
+	// first_second/last_second pair here, from a tick counter to elapsed
+	// seconds. The two coincided while the sample interval was always one
+	// second; they do not once a source raises it. Files at version 4 or below
+	// carry tick counts and must be multiplied by interval_milliseconds to be
+	// read as time.
+	indexSchemaVersion = 5
+	maxCoverageEntries = 32
 )
 
 // ResourceSample is one bounded resource observation written to resources.jsonl.
+//
+// Second is whole seconds elapsed since the monitor started, not an index of
+// samples taken. At a five-second interval the tenth sample reports 50.
 type ResourceSample struct {
 	Scope               string                   `json:"scope"`
 	RunID               string                   `json:"run_id"`
@@ -60,6 +69,7 @@ type Index struct {
 }
 
 // ComponentCoverage records which concrete runtime IDs contributed samples.
+// FirstSecond and LastSecond are elapsed seconds, matching ResourceSample.
 type ComponentCoverage struct {
 	Component   string `json:"component"`
 	RuntimeID   string `json:"runtime_id"`

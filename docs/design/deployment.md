@@ -93,9 +93,11 @@ start, evaluation and stop. Independent dependencies preserve these boundaries.
 
 ## Substitution and current limits
 
-The supported composition is local Docker on one daemon. Bridge runtime placement
-and sandbox execution are separately injected, but production supports Docker
-for both. Backend endpoints and socket mounts come from provider wiring.
+The reference composition is local Docker on one daemon. Bridge runtime placement
+and sandbox execution are separately injected, and both must use the same
+provider. Backend endpoints and socket mounts come from provider wiring. A
+[Kubernetes provider](../implementation/kubernetes.md) implements the same
+contracts on pods for a narrower set of runs.
 
 Deployment requests still include container-oriented resource settings, host
 mounts, network aliases and image-volume policy. The sandbox assumes Linux,

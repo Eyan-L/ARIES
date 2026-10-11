@@ -128,8 +128,8 @@ The supported topology is native Linux Docker with one network and bridge servic
 per run. Every live sandbox has its own bridge session/listener and unique service
 name, including repeated task IDs. Fresh evaluation sandboxes borrow the same
 network. Effective network policy is `shared-egress`, recorded in run infrastructure;
-benchmark `AllowNetwork` declarations remain metadata. No network-per-task option
-or additional provider is implemented. See the [bridge contract](design/bridge.md).
+benchmark `AllowNetwork` declarations remain metadata. Docker has no
+network-per-task option. See the [bridge contract](design/bridge.md).
 
 Compatibility normalization supplies Docker with `/var/run/docker.sock` for omitted
 harness/sandbox deployment blocks. An omitted bridge mode becomes `managed`, and
@@ -138,7 +138,7 @@ fails with a migration message; update it to `managed` and choose placement
 explicitly. `external` remains unsupported. Legacy `sandbox.type: "docker"`
 still maps to Docker deployment; conflicting explicit settings are rejected.
 
-`bridge.deployment.backend` must be `docker`. Bridges run in a separate container
+With Docker placement, `bridge.deployment.backend` is `docker`. Bridges run in a separate container
 on the run network and use the same local daemon as the sandbox. Composition
 supplies the required Docker socket mount explicitly; component labels do not
 grant access. The harness and sandbox never receive that socket. The bridge has daemon authority
@@ -152,6 +152,55 @@ directly into the OpenClaw harness; the bridge container does not need that clie
 Image preparation uses the selected daemon. Checked-in Docker bridge examples
 include [Hermes](../profiles/hermes-tb2-fix-git-deepseek.json) and
 [OpenClaw](../profiles/openclaw-tb2-fix-git-deepseek.json).
+
+### Kubernetes deployment
+
+`backend: "kubernetes"` places each runtime as a pod. ARIES reaches the cluster
+through `kubectl` and the context it resolves. Harness, sandbox and bridge must
+all select this backend and the same namespace; mixed compositions are rejected.
+
+```json
+{
+  "harness": {
+    "type": "hermes",
+    "deployment": {
+      "backend": "kubernetes",
+      "kubernetes": { "namespace": "aries", "images": { "aries-local/hermes": "registry.example/aries-hermes" } }
+    }
+  },
+  "sandbox": {
+    "deployment": {
+      "backend": "kubernetes",
+      "kubernetes": { "namespace": "aries", "pod_cidr": "192.168.0.0/16", "service_cidr": "10.96.0.0/12" }
+    }
+  },
+  "bridge": {
+    "type": "hermes-ssh",
+    "deployment": {
+      "backend": "kubernetes",
+      "kubernetes": { "namespace": "aries", "service_account": "aries-bridge", "images": { "aries-bridge": "registry.example/aries-bridge" } }
+    }
+  }
+}
+```
+
+| Field | Applies to | Meaning |
+| --- | --- | --- |
+| `namespace` | all | Namespace for every pod and policy. Defaults to `aries`; must match across the three blocks. |
+| `node_role` | all | Pins pods to nodes labelled `aries.dev/role=<value>` and tolerates the matching `NoSchedule` taint. |
+| `pod_cidr`, `service_cidr` | sandbox | Cluster networks a network-allowed sandbox is kept off. Unset leaves that egress open. |
+| `service_account` | bridge | Account the bridge pod uses to exec into sandbox pods. Defaults to `aries-bridge`. |
+| `image_pull_secret` | all | Registry credential Secret in the namespace. |
+| `images` | all | Maps an image ARIES builds locally to the reference the cluster pulls. A key without a tag maps the repository and keeps the requested tag. |
+
+The cluster pulls images, so `aries setup` builds nothing for this backend: the
+bridge image and the derived Hermes image must already be published. Each
+sandbox gets its own NetworkPolicy and the effective run policy is
+`per-sandbox-policy`. Checked-in examples are
+[Hermes](../profiles/hermes-tb2-fix-git-deepseek-k8s-pods.json) and
+[OpenClaw](../profiles/openclaw-tb2-fix-git-deepseek-k8s-pods.json). See the
+[Kubernetes implementation](implementation/kubernetes.md) for its constraints
+and [`k8s/`](../k8s/README.md) for cluster setup.
 
 Bridge addresses come from deployment resolution, not profile fields. Plaintext,
 unauthenticated gRPC control and harness-facing SSH use separate endpoints.

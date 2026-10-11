@@ -87,6 +87,13 @@ permission errors, and later sampling failures remain failures rather than being
 reclassified as unsupported. A successful observation whose counters are zero is
 still a real sample with status `succeeded`.
 
+Each sample's `second`, and the index's `first_second` and `last_second`, are
+whole seconds elapsed since monitoring started, not a count of samples
+(`schema_version` 5). Docker is sampled every second. The Kubernetes source
+reads a kubelet cache that refreshes every 10 to 20 seconds, so it samples at
+most every five seconds and records a sample only when the observation advances;
+`interval_milliseconds` in the index shows the interval used.
+
 Docker sampling can overlap runtime teardown. If a stats response lacks its
 observation timestamp, ARIES checks the same runtime again and skips that sample
 only when the runtime is confirmed stopped or removed. Invalid stats from a

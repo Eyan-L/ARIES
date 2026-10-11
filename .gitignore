@@ -31,6 +31,10 @@ go.work.sum
 .omx/
 .cache/
 runs/
+# Run artifacts pulled off a cluster with `kubectl cp` land outside runs/.
+# They hold full agent trajectories and tool-call logs.
+x4run/
+*-run-artifacts/
 .aries/
 DEEPSEEK_API.key
 DEEPSEEK.key
@@ -45,3 +49,18 @@ DEEPSEEK.key
 
 # Deep Research Sandbox Dockerfile
 images/**
+
+# aries-setup writes a command log to the directory it runs in.
+aries-setup-*.log
+
+# Credentials for the ARIES chart: the model API key and the registry document.
+# Start from k8s/aries/secret.yaml.example.
+#
+# Anchored to that one directory on purpose: charts commonly ship templates
+# named secret.yaml, and a repo-wide pattern would silently drop any such
+# template from a chart committed here.
+/k8s/aries/secret.yaml
+registry.json
+!**/registry.json.example
+
+kubeconfig

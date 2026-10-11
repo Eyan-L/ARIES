@@ -10,6 +10,7 @@ import (
 	"github.com/hyscale-lab/aries/pkg/bridge/target"
 	"github.com/hyscale-lab/aries/pkg/core"
 	"github.com/hyscale-lab/aries/pkg/deployment/docker"
+	"github.com/hyscale-lab/aries/pkg/deployment/kubernetes"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 )
@@ -27,6 +28,15 @@ func ServeChild(ctx context.Context, c managed.LaunchConfig, logger *logrus.Logg
 		}
 		backend = d
 		closeBackend = d.Close
+	case "kubernetes":
+		// The endpoint is the sandbox namespace; the pod's service account
+		// authorizes kubectl.
+		k, err := kubernetes.New(kubernetes.Options{Namespace: c.BackendEndpoint, Logger: logger})
+		if err != nil {
+			return err
+		}
+		backend = k
+		closeBackend = k.Close
 	default:
 		return errors.New("unsupported bridge execution backend")
 	}

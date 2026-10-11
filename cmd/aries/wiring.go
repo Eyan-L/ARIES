@@ -129,7 +129,7 @@ func newHarness(cfg config.Config, outputRoot string, lookup func(string) ([]byt
 	if err := harnesswiring.ValidateMCPServers(cfg.Harness); err != nil {
 		return app.HarnessInstance{}, err
 	}
-	transport, err := newDeployment(cfg.Harness.Deployment, cfg.Versions, logger)
+	transport, err := newHarnessDeployment(cfg, logger)
 	if err != nil {
 		return app.HarnessInstance{}, fmt.Errorf("construct harness deployment: %w", err)
 	}
@@ -154,6 +154,12 @@ func newSandbox(cfg config.Config, outputRoot, runID, occurrenceID string, gpuIn
 			return app.SandboxInstance{}, err
 		}
 		return sandboxwiring.New(outputRoot, occurrenceID, gpuIndices, logger, transport, environment.NewTaskEnvironment, resources)
+	case "kubernetes":
+		transport, resources, err := deploymentwiring.NewKubernetesSandbox(cfg.Sandbox.Deployment, runID, occurrenceID, logger)
+		if err != nil {
+			return app.SandboxInstance{}, err
+		}
+		return sandboxwiring.New(outputRoot, occurrenceID, gpuIndices, logger, transport, environment.NewTaskEnvironment, resources)
 	default:
 		return app.SandboxInstance{}, fmt.Errorf("unsupported sandbox.deployment.backend %q", cfg.Sandbox.Deployment.Backend)
 	}
@@ -168,21 +174,27 @@ func newSharedBridge(cfg config.Config, runID, outputRoot string, placement core
 	default:
 		return nil, fmt.Errorf("unsupported bridge type %q", cfg.Bridge.Type)
 	}
-	runtime, err := newDeployment(cfg.Bridge.Deployment, cfg.Versions, logger)
+	runtime, err := newDeployment(cfg.Bridge.Deployment, logger)
 	if err != nil {
 		return nil, fmt.Errorf("construct bridge deployment: %w", err)
 	}
 	launch := bridgewiring.Launch(cfg.Versions.Bridge.Image)
 	launch.RuntimeBackend = cfg.Bridge.Deployment.Backend
 	launch.ResourceMetrics = "unsupported"
-	if cfg.Bridge.Deployment.Backend == "docker" {
+	switch cfg.Bridge.Deployment.Backend {
+	case "docker":
 		launch.ResourceMetrics = "docker-stats"
+	case "kubernetes":
+		launch.ResourceMetrics = "kubelet-summary"
 	}
 	// Sandbox execution access is selected independently of bridge placement.
 	launch.Config.Backend = cfg.Sandbox.Deployment.Backend
 	switch cfg.Sandbox.Deployment.Backend {
 	case "docker":
 		launch.Config.BackendEndpoint, launch.Request.Mounts = deploymentwiring.DockerExecutionAccess(cfg.Sandbox.Deployment.Docker.Socket)
+	case "kubernetes":
+		// The bridge pod reaches sandboxes through its service account.
+		launch.Config.BackendEndpoint = cfg.Sandbox.Deployment.Kubernetes.Namespace
 	default:
 		return nil, errors.Join(fmt.Errorf("unsupported bridge execution backend %q", cfg.Sandbox.Deployment.Backend), runtime.Close())
 	}
@@ -196,6 +208,9 @@ func prepareBridge(ctx context.Context, cfg config.Config) error {
 	switch cfg.Bridge.Deployment.Backend {
 	case "docker":
 		return deploymentwiring.PrepareDockerBridge(ctx, cfg)
+	case "kubernetes":
+		// The cluster pulls the bridge image; ARIES cannot build into it.
+		return nil
 	default:
 		return fmt.Errorf("unsupported bridge preparation backend %q", cfg.Bridge.Deployment.Backend)
 	}
@@ -248,7 +263,7 @@ func validateDeployment(cfg *config.Config) error {
 		{"harness.deployment", cfg.Harness.Deployment}, {"sandbox.deployment", cfg.Sandbox.Deployment},
 	} {
 		switch component.placement.Backend {
-		case "docker":
+		case "docker", "kubernetes":
 		default:
 			return fmt.Errorf("%s: unsupported backend %q", component.path, component.placement.Backend)
 		}
@@ -256,12 +271,23 @@ func validateDeployment(cfg *config.Config) error {
 	return nil
 }
 
-func newDeployment(cfg config.DeploymentConfig, versions config.Versions, logger *logrus.Logger) (deployment.Deployment, error) {
+func newDeployment(cfg config.DeploymentConfig, logger *logrus.Logger) (deployment.Deployment, error) {
 	switch cfg.Backend {
 	case "docker":
 		return deploymentwiring.NewDocker(cfg, logger)
+	case "kubernetes":
+		return deploymentwiring.NewKubernetes(cfg, logger)
 	default:
 		return nil, fmt.Errorf("unsupported deployment backend %q", cfg.Backend)
+	}
+}
+
+func newHarnessDeployment(cfg config.Config, logger *logrus.Logger) (deployment.Deployment, error) {
+	switch cfg.Harness.Deployment.Backend {
+	case "kubernetes":
+		return deploymentwiring.NewKubernetesHarness(cfg.Harness.Deployment, cfg.Harness.Type, logger)
+	default:
+		return newDeployment(cfg.Harness.Deployment, logger)
 	}
 }
 
@@ -273,6 +299,9 @@ func pullImages(ctx context.Context, cfg config.Config, images []string) error {
 	switch cfg.Sandbox.Deployment.Backend {
 	case "docker":
 		return deploymentwiring.PullDockerImages(ctx, cfg.Sandbox.Deployment, images)
+	case "kubernetes":
+		// Each node's kubelet pulls images when it first schedules a pod.
+		return nil
 	default:
 		return fmt.Errorf("unsupported image preparation backend %q", cfg.Sandbox.Deployment.Backend)
 	}
@@ -293,6 +322,10 @@ func buildHarnessImage(ctx context.Context, cfg config.Config) error {
 		return harnesswiring.PrepareHermesImage(ctx, cfg, func(ctx context.Context, image, dockerfile string, buildArgs map[string]string) error {
 			return deploymentwiring.BuildDockerImage(ctx, cfg.Sandbox.Deployment, image, dockerfile, buildArgs)
 		})
+	case "kubernetes":
+		// The derived Hermes image must already be in a registry the cluster
+		// pulls from; harness.deployment.kubernetes.images names it.
+		return nil
 	default:
 		return fmt.Errorf("unsupported image preparation backend %q", cfg.Sandbox.Deployment.Backend)
 	}
@@ -315,6 +348,25 @@ func newInfrastructure(cfg config.Config, runID, outputRoot string, logger *logr
 		}
 		return &app.RunInfrastructure{
 			Environment: environment, Resources: resources, Close: owner.Close, NetworkPolicy: "shared-egress",
+			NewSandbox: func(cfg config.Config, root, run, occurrence string, gpus []int, log *logrus.Logger) (app.SandboxInstance, error) {
+				return newSandbox(cfg, root, run, occurrence, gpus, log, environment)
+			},
+			NewBridge: func(placement core.RuntimePlacement) (app.SharedBridge, error) {
+				return newSharedBridge(cfg, runID, outputRoot, placement, logger)
+			},
+		}, nil
+	case "kubernetes":
+		owner, err := deploymentwiring.NewKubernetes(cfg.Sandbox.Deployment, logger)
+		if err != nil {
+			return nil, err
+		}
+		environment := owner.NewRunEnvironment(runID)
+		resources, err := deploymentwiring.NewKubernetesRunResources(cfg.Bridge.Deployment, runID)
+		if err != nil {
+			return nil, errors.Join(err, owner.Close())
+		}
+		return &app.RunInfrastructure{
+			Environment: environment, Resources: resources, Close: owner.Close, NetworkPolicy: "per-sandbox-policy",
 			NewSandbox: func(cfg config.Config, root, run, occurrence string, gpus []int, log *logrus.Logger) (app.SandboxInstance, error) {
 				return newSandbox(cfg, root, run, occurrence, gpus, log, environment)
 			},

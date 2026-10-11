@@ -30,7 +30,7 @@ func TestRunRecorderMeasuresBridgeOnceWithoutTaskIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = recorder.Stop(context.Background()) })
-	if err := recorder.sample(context.Background(), 1, observed.Add(2*time.Second)); err != nil {
+	if err := recorder.sample(context.Background(), observed.Add(2*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	reports, err := recorder.Stop(context.Background())
@@ -54,7 +54,7 @@ func TestRunRecorderMeasuresBridgeOnceWithoutTaskIdentity(t *testing.T) {
 		}
 	}
 	index := readIndexStrict(t, report.LogPaths[1])
-	if index.SchemaVersion != 4 || index.Scope != "run" || index.RunID != "run-1" || index.TaskID != "" || len(index.Components) != 1 || index.Components[0].SampleCount != 2 {
+	if index.SchemaVersion != 5 || index.Scope != "run" || index.RunID != "run-1" || index.TaskID != "" || len(index.Components) != 1 || index.Components[0].SampleCount != 2 {
 		t.Fatalf("run index = %#v", index)
 	}
 	for _, path := range report.LogPaths {

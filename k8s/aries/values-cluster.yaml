@@ -1,0 +1,16 @@
+# A remote kubeadm cluster, with the runner on a host outside it.
+#
+# Harness pods dial the bridge pod's own address, so the agent's SSH hop is
+# pod-to-pod and the runner host needs no route into the pod network.
+#
+#   helm upgrade --install aries ./k8s/aries --namespace aries --create-namespace \
+#     -f ./k8s/aries/values-cluster.yaml
+#
+# aries-setup does exactly that on the control plane when cluster.json sets
+# deploy_aries.
+#
+# For a private registry, set `registry.create: true`, pass secret.yaml last,
+# and set `image_pull_secret: "aries-registry"` in the profile.
+
+registry:
+  create: false

@@ -1,0 +1,76 @@
+# Defaults for the ARIES chart.
+#
+# The chart deploys what ARIES needs *inside* the cluster. The runner itself is
+# not here: it runs as a process on a host outside the cluster (see
+# `aries-setup setup_runner`) and reaches the cluster with kubectl.
+#
+#   - the runner's ServiceAccount, its namespaced Role and a token for it
+#   - the tool bridge's ServiceAccount and Role (the runner creates one bridge
+#     pod per run; the chart ships no workload)
+#   - the nodes/proxy ClusterRole for pod telemetry
+#   - the Grafana dashboard ConfigMap
+#
+# Pick an environment file on top:
+#
+#   values-local.yaml       kind/minikube
+#   values-cluster.yaml     remote kubeadm cluster
+#
+# Images are chosen by the profile, not here. For a private registry, put the
+# pull document in the gitignored secret.yaml (see secret.yaml.example), set
+# registry.create, and name the Secret in the profile's image_pull_secret.
+
+# Resource names are kept stable at "aries" regardless of the release name, so
+# the ServiceAccount is always "aries" and the bridge "aries-bridge". Clear this
+# to get standard release-prefixed names.
+fullnameOverride: aries
+
+registry:
+  # Render the aries-registry dockerconfigjson Secret from
+  # registry.dockerconfigjson in secret.yaml. Only for a private image.
+  create: false
+  # A full Docker config document. Set this in secret.yaml, never here.
+  dockerconfigjson: ""
+
+bridge:
+  # The ServiceAccount and Role the per-run bridge pod uses to exec into
+  # sandbox pods. Off only for a Docker-only setup.
+  enabled: true
+
+rbac:
+  # The runner's namespaced Role: pod lifecycle, exec, port-forward, logs and
+  # NetworkPolicies. The runner cannot work without it.
+  create: true
+  # The one privilege the runner holds outside its namespace: `get` on
+  # nodes/proxy, so pod telemetry can read the kubelet Summary API through the
+  # API server. Read-only and confined to that subresource. Set false to drop
+  # it; the sandbox and harness still work and resources.jsonl is simply empty.
+  nodeMetrics: true
+
+serviceAccount:
+  # The runner's identity, plus a long-lived token Secret setup_runner builds
+  # the runner host's kubeconfig from.
+  create: true
+  name: aries
+
+# The ARIES Grafana dashboard, shipped as a ConfigMap for Grafana's dashboard
+# sidecar to pick up. It plots CPU, memory and CFS throttling for pods in this
+# namespace (bridge, harness and sandbox pods) from the kubelet's cAdvisor
+# endpoint, which kube-prometheus-stack already scrapes every 10s. The runner
+# is a host process, so it does not appear.
+#
+# On by default: the ConfigMap is inert without the monitoring stack. It does
+# need k8s/grafana/values.yaml's sidecar.dashboards.searchNamespace=ALL, since
+# it lives in this namespace rather than the monitoring one.
+grafanaDashboard:
+  enabled: true
+  # Both must match the monitoring release's sidecar.dashboards.label and
+  # .labelValue. kube-prometheus-stack sets the value to "1" and the sidecar
+  # matches on it, so a mismatch means the dashboard is never loaded and
+  # nothing reports an error.
+  label: grafana_dashboard
+  labelValue: "1"
+  # Grafana folder to file it under. Empty puts it in the sidecar's default.
+  folder: ARIES
+
+# Extra labels applied to every resource.
+commonLabels: {}

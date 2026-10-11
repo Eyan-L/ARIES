@@ -91,7 +91,7 @@ implementations:
 | --- | --- |
 | Agent harness | OpenClaw (text and realtime voice modes); Hermes (text) |
 | Benchmark | Terminal-Bench 2; Deep Research Bench; SWE-Atlas QA; the 731-task public SWE-bench Pro split; Toolathlon |
-| Tool sandbox | Shared Docker deployment through the Moby Go SDK |
+| Tool sandbox | Shared Docker deployment through the Moby Go SDK; Kubernetes pods through `kubectl` |
 | Tool bridge | One managed SSH service per run, with OpenClaw or Hermes dialect and independent sandbox sessions |
 | Model service | External DeepSeek; external OpenAI-compatible servers such as vLLM; external or ARIES-managed SGLang |
 
@@ -123,6 +123,10 @@ contact an external model endpoint.
 The DeepSeek example requires an API key and can incur charges. The
 [Quick start](docs/quick-start.md) covers secure credential setup, the first
 run, SGLang alternatives, result inspection, and troubleshooting.
+
+To run on a Kubernetes cluster, see [`k8s/`](k8s/README.md), which also covers
+bootstrapping a cluster with `aries-setup`. To run the runner itself in a
+container, see [`docker/`](docker/README.md).
 
 For repository-level software-engineering tasks, see the
 [SWE-bench Pro guide](docs/benchmarks/swe-bench-pro.md). Its setup additionally

@@ -6,7 +6,8 @@ Use `configs/versions.json` for pins; do not duplicate the field inventory here.
 
 - Keep role selection separate from placement. Harness and sandbox share a local
   Docker daemon and one run network; each run has one managed Docker bridge container.
-  Reject unsupported backends and explicit embedded mode before effects.
+  On Kubernetes all three components share one namespace and backend.
+  Reject unsupported or mixed backends and explicit embedded mode before effects.
 - Declare `overrides_file` explicitly (`""` disables overrides). Keep harness and
   sandbox resource limits independent; preserve omission/default semantics and
   explicit model request settings without silently changing their meaning. Judges

@@ -99,3 +99,60 @@ func TestSupportedBridgePlacements(t *testing.T) {
 		})
 	}
 }
+
+// The Kubernetes provider is selected by the same switches as Docker, and only
+// as a whole: a component left on another backend could not be reached.
+func TestKubernetesBackendSelectsItsProviderForEveryComponent(t *testing.T) {
+	source, err := os.ReadFile("../../profiles/openclaw-tb2-fix-git-deepseek-k8s-pods.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg config.Config
+	if err := json.Unmarshal(source, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Versions.Bridge.Image = "aries-bridge:v1"
+	if err := validateComponents(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.NormalizeDeployment(); err != nil {
+		t.Fatal(err)
+	}
+	for name, construct := range map[string]func() (interface{ Close() error }, error){
+		"harness": func() (interface{ Close() error }, error) { return newHarnessDeployment(cfg, nil) },
+		"bridge":  func() (interface{ Close() error }, error) { return newDeployment(cfg.Bridge.Deployment, nil) },
+	} {
+		transport, err := construct()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if backend, ok := transport.(interface{ BridgeBackend() string }); !ok || backend.BridgeBackend() != "kubernetes" {
+			t.Fatalf("%s: transport %T is not the Kubernetes provider", name, transport)
+		}
+		if err := transport.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Preparation builds nothing: the cluster pulls its own images.
+	if err := prepareBridge(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := pullImages(context.Background(), cfg, []string{"example.test/task:1"}); err != nil {
+		t.Fatal(err)
+	}
+	infrastructure, err := newInfrastructure(cfg, "run-1", t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if infrastructure.NetworkPolicy != "per-sandbox-policy" || infrastructure.Environment == nil || infrastructure.Resources == nil {
+		t.Fatalf("infrastructure = %+v", infrastructure)
+	}
+	if err := errors.Join(infrastructure.Resources.Close(), infrastructure.Close()); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.Bridge.Deployment = config.DeploymentConfig{Backend: "docker"}
+	if err := validateComponents(cfg); err == nil || !strings.Contains(err.Error(), "all use the kubernetes deployment backend") {
+		t.Fatalf("mixed backends = %v", err)
+	}
+}

@@ -2,7 +2,8 @@
 
 **Docker harnesses and sandboxes use the same local daemon**, with a separate
 managed Docker bridge and shared network per run. Runner stays on the host. Remote Docker
-servers and mixed deployment backends are unsupported. See the
+servers and mixed deployment backends are unsupported. **Kubernetes** places the
+same three components as pods in one namespace, for a narrower set of runs. See the
 [deployment configuration](configuration.md#deployment-configuration).
 
 This page summarizes capabilities and limitations. Use the
@@ -22,7 +23,8 @@ This page summarizes capabilities and limitations. Use the
 | Benchmark | **SWE-bench Pro** — public issue-resolution split with pinned task scripts and parser | [Benchmark guide](benchmarks/swe-bench-pro.md) |
 | Benchmark | **Toolathlon** — tool-use tasks over MCP servers that are local, public, or backed by Toolathlon's self-hosted applications (Canvas, poste.io, WooCommerce), and, given your account credentials, by third-party services; the `k8s` tasks are not supported | [Benchmark guide](benchmarks/toolathlon.md) |
 | Tool sandbox and deployment | **Docker** — local containers managed through the Moby Go SDK | [Deployment configuration](configuration.md#deployment-configuration), [Docker implementation](implementation/docker.md) |
-| Tool bridge | **OpenClaw SSH** and **Hermes SSH** — managed Docker container; harness-specific SSH adapters | [SSH bridge implementation](implementation/ssh-bridges.md) |
+| Tool sandbox and deployment | **Kubernetes** — one pod per runtime, driven through `kubectl`; Terminal-Bench 2 with OpenClaw or Hermes in text mode | [Kubernetes deployment](configuration.md#kubernetes-deployment), [Kubernetes implementation](implementation/kubernetes.md), [cluster setup](../k8s/README.md) |
+| Tool bridge | **OpenClaw SSH** and **Hermes SSH** — managed Docker container or Kubernetes pod; harness-specific SSH adapters | [SSH bridge implementation](implementation/ssh-bridges.md) |
 | Model service | **DeepSeek** — external endpoint | [Model backends](configuration.md#model-backends) |
 | Model service | **SGLang** — external endpoint or one ARIES-managed host process per run | [Model backends](configuration.md#model-backends) |
 | Model service | **OpenAI-compatible server** — external only, including vLLM, llama.cpp, gateways, and hosted endpoints | [Model backends](configuration.md#model-backends) |
@@ -44,6 +46,11 @@ guides above.
   rejects Hermes's private `~/.hermes` file synchronization. OpenClaw requires
   `bin/aries-ssh-client` beside `bin/aries`. Both bridges require the matched Docker bridge image built with
   `make bridge-image`.
+- The Kubernetes backend rejects tasks that execute as a non-root user or expose
+  task services, so SWE-bench Pro and Deep Research Bench require Docker. Images
+  need `/bin/sh`, and the bridge and derived Hermes images must be published to a
+  registry the cluster pulls from. See the
+  [Kubernetes implementation](implementation/kubernetes.md).
 - Realtime mode is OpenClaw-only and needs a separate TTS credential. See the
   [realtime setup](configuration.md#realtime-openclaw-mode).
 - External model servers are operated separately from ARIES. ARIES does not
@@ -61,7 +68,7 @@ guides above.
 
 ## Roadmap
 
-Additional deployment providers are unimplemented. Shared bridge lifecycle and
+Deployment providers beyond Docker and Kubernetes are unimplemented. Shared bridge lifecycle and
 deployment contracts accept explicit runtime placement and access settings;
 a new provider must implement their execution, connectivity, and cleanup semantics
 and be selected in composition wiring.
@@ -77,4 +84,5 @@ existing control API registers, looks up and releases borrowed sandbox access.
 
 See the [deployment contract](design/deployment.md),
 [Docker implementation](implementation/docker.md),
+[Kubernetes implementation](implementation/kubernetes.md),
 [SSH bridge implementation](implementation/ssh-bridges.md) for current boundaries.
