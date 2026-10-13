@@ -29,7 +29,7 @@ func taskRequest(allowNetwork bool) deployment.TaskEnvironmentRequest {
 func TestTaskPolicyDeniesIngressAndScopesEgress(t *testing.T) {
 	manager, _ := newTestManager(t, Options{PodCIDR: "192.168.0.0/16", ServiceCIDR: "10.96.0.0/12"})
 	for _, allow := range []bool{false, true} {
-		raw, err := manager.taskPolicyManifest(taskRequest(allow))
+		raw, err := manager.taskPolicyManifest(taskRequest(allow), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -150,10 +150,17 @@ func TestTaskEnvironmentExposesADeclaredTaskService(t *testing.T) {
 	}
 	request := taskRequest(true)
 	request.Environment.Services.SearchPort = 8888
+	request.Environment.Services.MCP = []core.TaskMCPService{{Name: "tools", Port: 9000, Path: "/mcp", Transport: "sse", TimeoutSeconds: 30}}
 	task := run.NewTaskEnvironment()
 	connectivity, err := task.Start(context.Background(), request)
 	if err != nil || connectivity.SearchURL != "http://aries-sandbox-abc123:8888" {
 		t.Fatalf("Start = %+v, %v", connectivity, err)
+	}
+	if len(connectivity.MCPServers) != 1 {
+		t.Fatalf("MCP servers = %+v", connectivity.MCPServers)
+	}
+	if mcp := connectivity.MCPServers[0]; mcp.Name != "tools" || mcp.URL != "http://aries-sandbox-abc123:9000/mcp" || mcp.Transport != "sse" || mcp.TimeoutSeconds != 30 {
+		t.Fatalf("MCP server = %+v", mcp)
 	}
 	if !objects["networkpolicy/aries-sandbox-abc123"] || !objects["service/aries-sandbox-abc123"] {
 		t.Fatalf("objects = %v", objects)
@@ -162,14 +169,15 @@ func TestTaskEnvironmentExposesADeclaredTaskService(t *testing.T) {
 	ingress := policy["ingress"].([]any)
 	rule := ingress[0].(map[string]any)
 	from := rule["from"].([]any)[0].(map[string]any)["podSelector"].(map[string]any)["matchLabels"].(map[string]any)
-	port := rule["ports"].([]any)[0].(map[string]any)
-	if len(ingress) != 1 || from[componentLabel] != "harness" || from[managedByLabel] != "aries" || port["port"] != float64(8888) || port["protocol"] != "TCP" {
+	admitted := rule["ports"].([]any)
+	port := admitted[0].(map[string]any)
+	if len(ingress) != 1 || from[componentLabel] != "harness" || from[managedByLabel] != "aries" || len(admitted) != 2 || port["port"] != float64(8888) || port["protocol"] != "TCP" || admitted[1].(map[string]any)["port"] != float64(9000) {
 		t.Fatalf("ingress = %v", ingress)
 	}
 	if selector := service["selector"].(map[string]any); len(selector) != 1 || selector[runtimeLabel] != "aries-sandbox-abc123" {
 		t.Fatalf("service selector = %v", selector)
 	}
-	if target := service["ports"].([]any)[0].(map[string]any); target["port"] != float64(8888) || target["targetPort"] != float64(8888) {
+	if target := service["ports"].([]any)[0].(map[string]any); len(service["ports"].([]any)) != 2 || target["port"] != float64(8888) || target["targetPort"] != float64(8888) {
 		t.Fatalf("service ports = %v", service["ports"])
 	}
 	if err := task.Stop(context.Background()); err != nil || objects["service/aries-sandbox-abc123"] || objects["networkpolicy/aries-sandbox-abc123"] {

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -132,15 +134,15 @@ func (e *taskEnvironment) Start(ctx context.Context, request deployment.TaskEnvi
 	if request.RunID != e.owner.runID || !validName(request.RuntimeName) {
 		return core.HarnessConnectivity{}, errors.New("task environment requires its run and a unique runtime name")
 	}
-	port := request.Environment.Services.SearchPort
-	if port < 0 || port > 65535 {
-		return core.HarnessConnectivity{}, errors.New("invalid task search service port")
+	ports, err := taskServicePorts(request.Environment.Services)
+	if err != nil {
+		return core.HarnessConnectivity{}, err
 	}
 	if err := e.owner.validate(); err != nil {
 		return core.HarnessConnectivity{}, err
 	}
 	manager := e.owner.manager
-	manifest, err := manager.taskPolicyManifest(request)
+	manifest, err := manager.taskPolicyManifest(request, ports)
 	if err != nil {
 		return core.HarnessConnectivity{}, err
 	}
@@ -151,12 +153,12 @@ func (e *taskEnvironment) Start(ctx context.Context, request deployment.TaskEnvi
 		return core.HarnessConnectivity{}, fmt.Errorf("create Kubernetes task network policy: %w", err)
 	}
 	result := core.HarnessConnectivity{Placement: core.RuntimePlacement{AttachmentID: manager.options.Namespace}}
-	if port == 0 {
+	if len(ports) == 0 {
 		return result, nil
 	}
-	// The harness needs the address before the sandbox pod exists, so the
-	// service gets a stable name: the same one Docker resolves on its network.
-	service, err := manager.taskServiceManifest(request, port)
+	// The harness needs the addresses before the sandbox pod exists, so the
+	// services get a stable name: the same one Docker resolves on its network.
+	service, err := manager.taskServiceManifest(request, ports)
 	if err != nil {
 		return core.HarnessConnectivity{}, err
 	}
@@ -164,8 +166,38 @@ func (e *taskEnvironment) Start(ctx context.Context, request deployment.TaskEnvi
 	if _, err := manager.run(ctx, service, "create", "-n", manager.options.Namespace, "-f", "-"); err != nil {
 		return core.HarnessConnectivity{}, fmt.Errorf("create Kubernetes task service: %w", err)
 	}
-	result.SearchURL = fmt.Sprintf("http://%s:%d", request.RuntimeName, port)
+	services := request.Environment.Services
+	if services.SearchPort != 0 {
+		result.SearchURL = fmt.Sprintf("http://%s:%d", request.RuntimeName, services.SearchPort)
+	}
+	for _, mcp := range services.MCP {
+		result.MCPServers = append(result.MCPServers, core.MCPServerConfig{
+			Name: mcp.Name, URL: fmt.Sprintf("http://%s:%d%s", request.RuntimeName, mcp.Port, mcp.Path),
+			Transport: mcp.Transport, TimeoutSeconds: mcp.TimeoutSeconds,
+		})
+	}
 	return result, nil
+}
+
+// taskServicePorts lists the distinct ports a task declares for the harness:
+// its search engine and any MCP servers it runs inside the sandbox.
+func taskServicePorts(services core.TaskServices) ([]int, error) {
+	if services.SearchPort < 0 || services.SearchPort > 65535 {
+		return nil, errors.New("invalid task search service port")
+	}
+	var ports []int
+	if services.SearchPort != 0 {
+		ports = append(ports, services.SearchPort)
+	}
+	for _, mcp := range services.MCP {
+		if mcp.Port <= 0 || mcp.Port > 65535 {
+			return nil, fmt.Errorf("invalid port for task MCP service %q", mcp.Name)
+		}
+		if !slices.Contains(ports, mcp.Port) {
+			ports = append(ports, mcp.Port)
+		}
+	}
+	return ports, nil
 }
 
 func (e *taskEnvironment) Validate(ctx context.Context) error {
@@ -231,8 +263,12 @@ func (manager *Manager) deleteObject(ctx context.Context, kind, name string) err
 	return nil
 }
 
-// taskServiceManifest gives one sandbox's task service a cluster address.
-func (manager *Manager) taskServiceManifest(request deployment.TaskEnvironmentRequest, port int) ([]byte, error) {
+// taskServiceManifest gives one sandbox's task services a cluster address.
+func (manager *Manager) taskServiceManifest(request deployment.TaskEnvironmentRequest, ports []int) ([]byte, error) {
+	servicePorts := make([]any, 0, len(ports))
+	for _, port := range ports {
+		servicePorts = append(servicePorts, map[string]any{"name": "port-" + strconv.Itoa(port), "protocol": "TCP", "port": port, "targetPort": port})
+	}
 	return json.Marshal(map[string]any{
 		"apiVersion": "v1", "kind": "Service",
 		"metadata": map[string]any{
@@ -242,7 +278,7 @@ func (manager *Manager) taskServiceManifest(request deployment.TaskEnvironmentRe
 		},
 		"spec": map[string]any{
 			"selector": map[string]string{runtimeLabel: request.RuntimeName},
-			"ports":    []any{map[string]any{"name": "search", "protocol": "TCP", "port": port, "targetPort": port}},
+			"ports":    servicePorts,
 		},
 	})
 }
@@ -260,13 +296,13 @@ func (manager *Manager) taskServiceManifest(request deployment.TaskEnvironmentRe
 // through the API server's exec endpoint.
 //
 // The one exception is a declared task service, such as a benchmark's search
-// engine: harness pods may reach that port and nothing else. Pods carry their
+// engine or MCP server: harness pods may reach those ports and nothing else. Pods carry their
 // role but not their task as a label, so this admits every harness in the
 // namespace, as Docker's shared run network does.
 //
 // Naming a direction in policyTypes with no rule block denies it; an empty rule
 // list would instead permit everything.
-func (manager *Manager) taskPolicyManifest(request deployment.TaskEnvironmentRequest) ([]byte, error) {
+func (manager *Manager) taskPolicyManifest(request deployment.TaskEnvironmentRequest, ports []int) ([]byte, error) {
 	spec := map[string]any{
 		"podSelector": map[string]any{"matchLabels": map[string]string{runtimeLabel: request.RuntimeName}},
 		"policyTypes": []any{"Ingress", "Egress"},
@@ -274,10 +310,14 @@ func (manager *Manager) taskPolicyManifest(request deployment.TaskEnvironmentReq
 	if request.Environment.AllowNetwork {
 		spec["egress"] = egressRules(manager.options.PodCIDR, manager.options.ServiceCIDR)
 	}
-	if port := request.Environment.Services.SearchPort; port != 0 {
+	if len(ports) != 0 {
+		admitted := make([]any, 0, len(ports))
+		for _, port := range ports {
+			admitted = append(admitted, map[string]any{"protocol": "TCP", "port": port})
+		}
 		spec["ingress"] = []any{map[string]any{
 			"from":  []any{map[string]any{"podSelector": map[string]any{"matchLabels": map[string]string{managedByLabel: "aries", componentLabel: "harness"}}}},
-			"ports": []any{map[string]any{"protocol": "TCP", "port": port}},
+			"ports": admitted,
 		}}
 	}
 	return json.Marshal(map[string]any{
