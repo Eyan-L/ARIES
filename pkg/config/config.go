@@ -427,6 +427,19 @@ type Versions struct {
 	SWEbenchPro       SWEbenchProVersions       `json:"swebenchpro"`
 	OpenClaw          OpenClawVersions          `json:"openclaw"`
 	Hermes            HermesVersions            `json:"hermes"`
+	// VMD pins the host stack scripts/vmd/install.sh installs for the vmd
+	// sandbox; preflight requires the daemon to report the same Kata version.
+	VMD VMDVersions `json:"vmd"`
+}
+
+type VMDVersions struct {
+	Kata VMDKataVersions `json:"kata"`
+}
+
+type VMDKataVersions struct {
+	Version string `json:"version"`
+	URL     string `json:"url"`
+	SHA256  string `json:"sha256"`
 }
 
 type TerminalBench2Versions struct {
@@ -1168,6 +1181,8 @@ func (stt *VoiceSTTConfig) validate() error {
 	return err
 }
 
+var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 func (c Versions) validate() error {
 	if strings.TrimSpace(c.OpenClaw.Image) == "" {
 		return errors.New("openclaw.image is required")
@@ -1197,6 +1212,17 @@ func (c Versions) validate() error {
 	if strings.TrimSpace(c.Hermes.Image) != "" {
 		if err := containerimage.ValidatePinnedTagOnly(c.Hermes.Image); err != nil {
 			return fmt.Errorf("hermes.image: %w", err)
+		}
+	}
+	if kata := c.VMD.Kata; kata != (VMDKataVersions{}) {
+		if !validPluginVersion(kata.Version) {
+			return errors.New("vmd.kata.version must be a dotted release number")
+		}
+		if !strings.HasPrefix(kata.URL, "https://") {
+			return errors.New("vmd.kata.url must be an HTTPS URL")
+		}
+		if !sha256Hex.MatchString(kata.SHA256) {
+			return errors.New("vmd.kata.sha256 must be 64 lowercase hex characters")
 		}
 	}
 	if plugin := c.Hermes.OTelPlugin; plugin != (HermesOTelPluginVersions{}) {

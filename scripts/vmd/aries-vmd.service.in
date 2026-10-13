@@ -1,0 +1,23 @@
+[Unit]
+Description=ARIES Kata/Firecracker tool sandbox daemon
+Requires=aries-containerd.service
+After=aries-containerd.service
+
+[Service]
+ExecStart=/usr/local/bin/aries-vmd \
+  --socket /run/aries-vmd.sock \
+  --group @GROUP@ \
+  --containerd-address /run/aries-containerd/containerd.sock \
+  --runtime io.containerd.kata-fc.v2 \
+  --snapshotter devmapper \
+  --state-dir /var/lib/aries-vmd \
+  --helper /usr/local/libexec/aries/aries-vmd-helper \
+  --storage-limit-mb @STORAGE_LIMIT_MB@ \
+  --kata-shim /opt/kata/bin/containerd-shim-kata-v2 \
+  --firecracker /opt/kata/bin/firecracker
+Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

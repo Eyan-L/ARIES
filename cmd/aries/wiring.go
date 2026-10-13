@@ -146,6 +146,12 @@ func newSandbox(cfg config.Config, outputRoot, runID, occurrenceID string, gpuIn
 			return app.SandboxInstance{}, err
 		}
 		return sandboxwiring.New(outputRoot, occurrenceID, gpuIndices, logger, transport, transport.NewTaskEnvironment, resources)
+	case "vmd":
+		transport, newEnvironment, resources, err := deploymentwiring.NewVMDSandbox(cfg.Sandbox.Deployment, cfg.Harness.Deployment, runID, occurrenceID, logger)
+		if err != nil {
+			return app.SandboxInstance{}, err
+		}
+		return sandboxwiring.New(outputRoot, occurrenceID, gpuIndices, logger, transport, newEnvironment, resources)
 	default:
 		return app.SandboxInstance{}, fmt.Errorf("unsupported sandbox.deployment.backend %q", cfg.Sandbox.Deployment.Backend)
 	}
@@ -204,6 +210,11 @@ func validateDeployment(cfg *config.Config) error {
 	} {
 		switch component.placement.Backend {
 		case "docker":
+		case "vmd":
+			// Normalization admits vmd only for the tool sandbox.
+			if component.path != "sandbox.deployment" {
+				return fmt.Errorf("%s: backend vmd supports only the tool sandbox", component.path)
+			}
 		case "kubernetes":
 			return fmt.Errorf("%s: Kubernetes deployment is not implemented", component.path)
 		default:
@@ -232,6 +243,16 @@ func pullImages(ctx context.Context, cfg config.Config, images []string) error {
 	switch cfg.Sandbox.Deployment.Backend {
 	case "docker":
 		return deploymentwiring.PullDockerImages(ctx, cfg.Sandbox.Deployment, images)
+	case "vmd":
+		// Images are pinned in the harness Docker daemon, then exported to aries-vmd.
+		if err := deploymentwiring.PullDockerImages(ctx, cfg.Harness.Deployment, images); err != nil {
+			return err
+		}
+		harnessImage, err := cfg.Versions.HarnessImage(cfg.Harness.Type)
+		if err != nil {
+			return err
+		}
+		return deploymentwiring.PrepareVMDImages(ctx, cfg.Sandbox.Deployment, cfg.Harness.Deployment, cfg.Versions.VMD.Kata.Version, deploymentwiring.SandboxImages(images, harnessImage), logrus.StandardLogger())
 	default:
 		return fmt.Errorf("unsupported image preparation backend %q", cfg.Sandbox.Deployment.Backend)
 	}
@@ -248,9 +269,10 @@ func buildHarnessImage(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	switch cfg.Sandbox.Deployment.Backend {
-	case "docker":
+	case "docker", "vmd":
+		// The harness always runs on its Docker daemon.
 		return harnesswiring.PrepareHermesImage(ctx, cfg, func(ctx context.Context, image, dockerfile string, buildArgs map[string]string) error {
-			return deploymentwiring.BuildDockerImage(ctx, cfg.Sandbox.Deployment, image, dockerfile, buildArgs)
+			return deploymentwiring.BuildDockerImage(ctx, cfg.Harness.Deployment, image, dockerfile, buildArgs)
 		})
 	default:
 		return fmt.Errorf("unsupported image preparation backend %q", cfg.Sandbox.Deployment.Backend)

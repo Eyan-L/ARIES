@@ -80,8 +80,10 @@ attachment ownership before creating its runtime, and retains environment
 ownership through evaluation. Search-enabled harnesses reject missing or invalid
 URLs; disabled search requires no endpoint.
 
-`RuntimePlacement{DockerNetwork}` names the task-owned Docker network. Docker
-validates and translates that field when creating runtimes. This preserves
+`RuntimePlacement{DockerNetwork, VMNetwork}` names the task-owned attachments.
+Docker validates and translates `DockerNetwork` when creating runtimes; the
+`vmd` sandbox provider requires `VMNetwork`, its daemon-owned VM network, and
+ignores the Docker field. This preserves
 current local Docker profiles without imposing Docker network syntax on harness
 policy. Unsupported or missing placements fail explicitly. Separate profile
 deployment blocks do not imply heterogeneous deployment support.
@@ -102,7 +104,21 @@ contract constraints, not proof of arbitrary backend portability. Another backen
 requires explicit decisions about these semantics, staging, execution identity,
 and cancellation rather than silently weakening them.
 
-Docker is the implemented provider. Kubernetes is a planned, unsupported target;
+## Heterogeneous placement: Docker harness with vmd sandbox
+
+The `vmd` sandbox provider is the one supported mixed topology. Its task
+environment composes the harness's Docker task environment with a VM network
+owned by `aries-vmd`. The harness and the embedded bridge keep the Docker
+network and its gateway; the bridge reaches the VM only through sandbox exec
+and archive operations, never over the network. A benchmark search service in
+the sandbox is reached through an ARIES-owned TCP forwarder on the Docker
+gateway, which resolves the VM's `task-sandbox` member per connection and
+replaces the alias URL. Stop removes the forwarder, then the VM network, then
+the Docker network, each with confirmed absence. See the
+[vmd implementation](../implementation/vmd.md).
+
+Docker is the implemented provider for harnesses and sandboxes, and `vmd` is an
+implemented sandbox-only provider. Kubernetes is a planned, unsupported target;
 see the [support and roadmap reference](../supported.md). Current CLI selection
 rejects it before model services, image preparation, or resource allocation in
 [`cmd/aries/wiring.go`](../../cmd/aries/wiring.go).

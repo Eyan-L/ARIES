@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint integration run setup
+.PHONY: build test test-race lint integration integration-vmd run setup
 
 PROFILE ?= profiles/openclaw-tb2-fix-git-deepseek.json
 
@@ -9,6 +9,8 @@ build:
 	mkdir -p bin
 	go build -o bin/aries ./cmd/aries
 	CGO_ENABLED=0 go build -o bin/aries-ssh ./cmd/aries-ssh
+	CGO_ENABLED=0 go build -o bin/aries-vmd-helper ./cmd/aries-vmd-helper
+	go build -o bin/aries-vmd ./cmd/aries-vmd
 
 test:
 	go test -v ./...
@@ -24,6 +26,11 @@ integration:
 	mkdir -p .cache/integration
 	CGO_ENABLED=0 go build -o .cache/integration/aries-ssh ./cmd/aries-ssh
 	ARIES_SSH_CLIENT=$(CURDIR)/.cache/integration/aries-ssh go test -p=1 -count=1 -tags=integration ./...
+
+# Requires KVM, a running aries-vmd daemon (scripts/vmd/install.sh), access
+# to its socket, and the local Docker daemon.
+integration-vmd:
+	go test -p=1 -count=1 -tags=vmdintegration ./pkg/deployment/vmd/
 
 run: build
 	./bin/aries $(PROFILE)

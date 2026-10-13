@@ -1,0 +1,17 @@
+[Unit]
+Description=containerd for ARIES Kata/Firecracker sandboxes
+Requires=aries-vmd-devmapper.service
+After=network.target aries-vmd-devmapper.service
+
+[Service]
+ExecStart=@CONTAINERD@ --config /etc/aries-vmd/containerd.toml
+Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+Delegate=yes
+KillMode=process
+Restart=always
+RestartSec=5
+LimitNOFILE=infinity
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target

@@ -5,9 +5,12 @@ Start from `profiles/*.json`; consult the [schema](../pkg/config/config.go),
 Use `configs/versions.json` for pins; do not duplicate the field inventory here.
 Hermes derives its local image from the catalog’s base image and OTel plugin pins.
 
-- Harness selection and deployment selection are separate. Currently harness and
-  sandbox require the same local Docker daemon; only embedded bridges work.
-  Reject unsupported placement before effects; do not imply Kubernetes support.
+- Harness selection and deployment selection are separate. The harness uses
+  local Docker; the sandbox uses the same Docker daemon or `vmd` (Kata/Firecracker
+  microVMs via the root `aries-vmd` daemon, sandbox only). Only embedded bridges
+  work. Reject unsupported placement before effects; do not imply Kubernetes support.
+- Keep VM isolation policy (runtime, mounts, sizes, firewall) in `aries-vmd`,
+  never in client-supplied fields; `vmd` preparation must not start VMs.
 - Declare `overrides_file` explicitly (`""` disables overrides). Keep harness and
   sandbox resource limits independent; preserve omission/default semantics and
   explicit model request settings without silently changing their meaning. Judges

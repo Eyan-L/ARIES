@@ -1,0 +1,13 @@
+[Unit]
+Description=Attach the aries-vmd devmapper thin pool
+DefaultDependencies=no
+After=local-fs.target
+Before=aries-containerd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/aries/devmapper-pool.sh @DEVMAPPER_DIR@ @POOL_NAME@
+
+[Install]
+WantedBy=multi-user.target

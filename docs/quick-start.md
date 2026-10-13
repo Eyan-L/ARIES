@@ -7,7 +7,8 @@ one option below, then inspect its result. Run commands from the repository root
 
 - Linux with a running **local Docker Engine** and access to `/var/run/docker.sock`.
   Harness and sandbox must use the same local daemon. Remote Docker servers,
-  Docker Desktop, rootless networking, and mixed deployment backends are unsupported.
+  Docker Desktop, rootless networking, and mixed deployment backends are unsupported,
+  except the optional [microVM tool sandbox](configuration.md#microvm-tool-sandbox-vmd).
 - Go 1.26.5, Git, and Make. Go's toolchain selection can download 1.26.5 when
   an older Go launcher is installed.
 - Network access to GitHub, GHCR, Docker Hub, and the configured model endpoint.

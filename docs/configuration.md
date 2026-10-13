@@ -98,7 +98,7 @@ They do not establish support for mixed backends today. A heterogeneous setup
 will also need compatible connectivity, identity, isolation, and cleanup semantics;
 see the [deployment contract](design/deployment.md).
 
-Both components currently must use the same supported local Docker daemon. `socket`
+With two Docker blocks, both components must use the same supported local Docker daemon. `socket`
 accepts an absolute Unix socket path or `unix:///absolute/path`; normalization
 cleans the path before comparing the two settings. Remote Docker endpoints are
 rejected. Image preparation and resource monitoring use the selected socket.
@@ -112,6 +112,42 @@ and defaults omitted `bridge.mode` to `embedded`. Legacy `sandbox.type:
 Unknown backends, options from a different backend, and unsupported bridge modes
 fail validation. `embedded` means the listener runs inside ARIES. Bridge modes
 `managed` and `external` are not implemented.
+
+### MicroVM tool sandbox (`vmd`)
+
+The tool sandbox can instead run each task sandbox and fresh evaluation sandbox
+in its own Firecracker microVM through Kata Containers. ARIES uses the
+privileged `aries-vmd` host daemon for this; set up the host first with the
+[vmd guide](implementation/vmd.md).
+
+```json
+{
+  "harness": {
+    "type": "openclaw",
+    "deployment": { "backend": "docker", "docker": { "socket": "/var/run/docker.sock" } }
+  },
+  "sandbox": {
+    "deployment": {
+      "backend": "vmd",
+      "vmd": { "socket": "/run/aries-vmd.sock", "isolation": "kata-fc" }
+    }
+  }
+}
+```
+
+`vmd` is valid only for `sandbox.deployment`; the harness stays on Docker and
+selecting `vmd` for the harness fails validation. `vmd.socket` defaults to
+`/run/aries-vmd.sock` and follows the same local Unix socket rules as Docker.
+`vmd.isolation` defaults to and only accepts `kata-fc`. The harness Docker
+daemon also supplies images: preparation pulls every image there, checks
+daemon health (KVM, API version, isolation), and exports each task image into
+`aries-vmd` unless it already holds the same image identity. Example:
+[`profiles/openclaw-tb2-fix-git-vmd-deepseek.json`](../profiles/openclaw-tb2-fix-git-vmd-deepseek.json).
+
+Task resource requests differ inside a VM: fractional CPU rounds up to whole
+vCPUs, an omitted memory limit uses the daemon's default VM size, requested
+storage cannot exceed the daemon's fixed root-filesystem size, and GPU requests
+are rejected before any resource is created.
 
 Bridge addresses come from task composition, with separate local bind and
 harness destination addresses; they are not profile fields. Docker uses the

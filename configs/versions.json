@@ -27,5 +27,12 @@
       "version": "1.19.0",
       "revision": "9a0aed646611023c4d4aec5b7897a72511559956"
     }
+  },
+  "vmd": {
+    "kata": {
+      "version": "4.2.0",
+      "url": "https://github.com/kata-containers/kata-containers/releases/download/4.2.0/kata-go-static-4.2.0-amd64.tar.zst",
+      "sha256": "7dda31ca54b397cbf8165f620d6041872d3c45b7a77383ce0e86f76a06e103d0"
+    }
   }
 }

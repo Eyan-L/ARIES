@@ -47,6 +47,15 @@ func TestDeploymentDecodeAndValidation(t *testing.T) {
 		{"runtime class", `{"backend":"kubernetes","kubernetes":{"runtime_class_name":"bad/name"}}`, `{}`, "embedded", "runtime_class_name"},
 		{"context", `{"backend":"kubernetes","kubernetes":{"context":" cluster "}}`, `{}`, "embedded", "context"},
 		{"unknown field", `{"backend":"docker","docker":{"host":"localhost"}}`, `{}`, "embedded", "unknown field"},
+		{"vmd sandbox", `{"backend":"docker"}`, `{"deployment":{"backend":"vmd","vmd":{"socket":"unix:///run/../run/aries-vmd.sock"}}}`, "embedded", ""},
+		{"vmd defaults", `{}`, `{"deployment":{"backend":"vmd"}}`, "embedded", ""},
+		{"vmd harness", `{"backend":"vmd"}`, `{}`, "embedded", "harness.deployment: backend vmd supports only the tool sandbox"},
+		{"vmd isolation", `{}`, `{"deployment":{"backend":"vmd","vmd":{"isolation":"runc"}}}`, "embedded", "sandbox.deployment.vmd.isolation"},
+		{"vmd socket", `{}`, `{"deployment":{"backend":"vmd","vmd":{"socket":"tcp://host:1"}}}`, "embedded", "sandbox.deployment.vmd.socket"},
+		{"vmd with Docker block", `{}`, `{"deployment":{"backend":"vmd","docker":{}}}`, "embedded", "sandbox.deployment.docker"},
+		{"Docker with vmd block", `{}`, `{"deployment":{"backend":"docker","vmd":{}}}`, "embedded", "sandbox.deployment.vmd"},
+		{"vmd block without backend", `{}`, `{"deployment":{"vmd":{}}}`, "embedded", "sandbox.deployment.backend"},
+		{"vmd with different harness socket", `{"backend":"docker","docker":{"socket":"/other/docker.sock"}}`, `{"deployment":{"backend":"vmd"}}`, "embedded", ""},
 		{"managed bridge", `{}`, `{}`, "managed", "bridge.mode"},
 		{"external bridge", `{}`, `{}`, "external", "bridge.mode"},
 	}
@@ -64,6 +73,11 @@ func TestDeploymentDecodeAndValidation(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			if strings.HasPrefix(tc.name, "vmd") && tc.want == "" {
+				if vmd := cfg.Sandbox.Deployment.VMD; vmd == nil || vmd.Socket != "/run/aries-vmd.sock" || vmd.Isolation != "kata-fc" || cfg.Sandbox.Deployment.Docker != nil {
+					t.Fatalf("vmd settings: %#v", cfg.Sandbox.Deployment)
+				}
 			}
 			if tc.name == "independent Kubernetes" && (cfg.Harness.Deployment.Kubernetes.RuntimeClassName != "kata" || cfg.Sandbox.Deployment.Backend != "docker") {
 				t.Fatalf("independent settings lost: %#v", cfg)

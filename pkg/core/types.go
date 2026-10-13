@@ -124,9 +124,11 @@ type ToolEndpoint struct {
 }
 
 // RuntimePlacement carries the task attachment to the deployment implementation.
-// Only Docker is supported; other backends can extend this contract when implemented.
+// Each provider reads only its own field and rejects a placement that lacks it.
 type RuntimePlacement struct {
 	DockerNetwork string `json:"docker_network,omitempty"`
+	// VMNetwork is the aries-vmd task network ID for microVM tool sandboxes.
+	VMNetwork string `json:"vm_network,omitempty"`
 }
 
 // TaskServices declares services the benchmark starts during preparation.

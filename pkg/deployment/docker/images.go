@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -94,4 +95,55 @@ func validatePullImage(image string) error {
 		return errors.New("image must not contain surrounding whitespace")
 	}
 	return nil
+}
+
+func newImageClient(socket string) (*client.Client, error) {
+	host := socket
+	if host == "" {
+		host = defaultDockerSocket
+	}
+	if !strings.Contains(host, "://") {
+		host = "unix://" + host
+	}
+	api, err := client.New(client.WithHost(host), client.WithUserAgent("aries-setup/1"))
+	if err != nil {
+		return nil, fmt.Errorf("create Docker client: %w", err)
+	}
+	return api, nil
+}
+
+// ImageID returns the local Docker image ID of a prepared image.
+func ImageID(ctx context.Context, socket, image string) (string, error) {
+	api, err := newImageClient(socket)
+	if err != nil {
+		return "", err
+	}
+	inspection, err := api.ImageInspect(ctx, image)
+	if err == nil {
+		err = validatePreparedImage(image, inspection)
+	}
+	return inspection.ID, errors.Join(err, api.Close())
+}
+
+// SaveImage exports one local image as a `docker save` archive. Closing the
+// archive also closes its Docker client.
+func SaveImage(ctx context.Context, socket, image string) (io.ReadCloser, error) {
+	api, err := newImageClient(socket)
+	if err != nil {
+		return nil, err
+	}
+	archive, err := api.ImageSave(ctx, []string{image})
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("export Docker image %q: %w", image, err), api.Close())
+	}
+	return &savedImage{ReadCloser: archive, api: api}, nil
+}
+
+type savedImage struct {
+	io.ReadCloser
+	api *client.Client
+}
+
+func (archive *savedImage) Close() error {
+	return errors.Join(archive.ReadCloser.Close(), archive.api.Close())
 }

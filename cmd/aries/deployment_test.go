@@ -81,3 +81,34 @@ func TestKubernetesStopsRunAndSetupBeforeSideEffects(t *testing.T) {
 		}
 	}
 }
+
+func vmdConfig(t *testing.T, harnessBackend string) config.Config {
+	t.Helper()
+	var cfg config.Config
+	profile := `{"benchmark":{"type":"terminalbench2"},"harness":{"type":"hermes","deployment":{"backend":"` + harnessBackend + `"}},"sandbox":{"deployment":{"backend":"vmd","vmd":{"socket":"/run/aries-vmd-test.sock"}}},"bridge":{"type":"hermes-ssh","mode":"embedded"}}`
+	if err := json.Unmarshal([]byte(profile), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestVMDSandboxSelection(t *testing.T) {
+	if err := validateComponents(vmdConfig(t, "docker")); err != nil {
+		t.Fatal(err)
+	}
+	harnessVMD := vmdConfig(t, "vmd")
+	if err := validateComponents(harnessVMD); err == nil || !strings.Contains(err.Error(), "supports only the tool sandbox") {
+		t.Fatalf("harness vmd error = %v", err)
+	}
+	// Construction configures clients without contacting either daemon.
+	instance, err := newSandbox(vmdConfig(t, "docker"), t.TempDir(), "run-1", "task-1", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instance.Sandbox == nil || instance.Resources == nil || instance.BridgeListen == nil {
+		t.Fatalf("instance = %#v", instance)
+	}
+	if err := errors.Join(instance.Resources.Close(), instance.Close()); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -13,7 +13,10 @@
   Inspect `runs/<run-id>/run-result.json`: harness outcome, evaluation score,
   confirmed isolation, and cleanup. Exit status alone is insufficient.
 - After runtime work, check for leaked containers, networks, processes, listeners,
-  and credential files. Scan private artifacts without printing secrets.
+  and credential files. Scan private artifacts without printing secrets. For
+  `vmd`, also check the daemon's `List`, containerd namespace `aries-vmd`, kata
+  shim/firecracker processes, `aries-*` netns, `avb*`/`avh*` links, and the
+  `inet aries_vmd` nft table. `make integration-vmd` needs KVM and a running daemon.
 - Preserve unrelated work and follow the user's staging/commit instructions.
   Keep credentials, datasets, run artifacts, and OMX state ignored. Report actual
   evidence and validation gaps; never infer success from intended behavior.
