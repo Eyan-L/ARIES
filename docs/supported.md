@@ -23,7 +23,7 @@ This page summarizes capabilities and limitations. Use the
 | Benchmark | **SWE-bench Pro** — public issue-resolution split with pinned task scripts and parser | [Benchmark guide](benchmarks/swe-bench-pro.md) |
 | Benchmark | **Toolathlon** — tool-use tasks over MCP servers that are local, public, or backed by Toolathlon's self-hosted applications (Canvas, poste.io, WooCommerce), and, given your account credentials, by third-party services; the `k8s` tasks are not supported | [Benchmark guide](benchmarks/toolathlon.md) |
 | Tool sandbox and deployment | **Docker** — local containers managed through the Moby Go SDK | [Deployment configuration](configuration.md#deployment-configuration), [Docker implementation](implementation/docker.md) |
-| Tool sandbox and deployment | **Kubernetes** — one pod per runtime, driven through `kubectl`; Terminal-Bench 2 with OpenClaw or Hermes in text mode | [Kubernetes deployment](configuration.md#kubernetes-deployment), [Kubernetes implementation](implementation/kubernetes.md), [cluster setup](../k8s/README.md) |
+| Tool sandbox and deployment | **Kubernetes** — one pod per runtime, driven through `kubectl`; Terminal-Bench 2 and SWE-bench Pro with OpenClaw or Hermes in text mode | [Kubernetes deployment](configuration.md#kubernetes-deployment), [Kubernetes implementation](implementation/kubernetes.md), [cluster setup](../k8s/README.md) |
 | Tool bridge | **OpenClaw SSH** and **Hermes SSH** — managed Docker container or Kubernetes pod; harness-specific SSH adapters | [SSH bridge implementation](implementation/ssh-bridges.md) |
 | Model service | **DeepSeek** — external endpoint | [Model backends](configuration.md#model-backends) |
 | Model service | **SGLang** — external endpoint or one ARIES-managed host process per run | [Model backends](configuration.md#model-backends) |
@@ -46,10 +46,11 @@ guides above.
   rejects Hermes's private `~/.hermes` file synchronization. OpenClaw requires
   `bin/aries-ssh-client` beside `bin/aries`. Both bridges require the matched Docker bridge image built with
   `make bridge-image`.
-- The Kubernetes backend rejects tasks that execute as a non-root user or expose
-  task services, so SWE-bench Pro and Deep Research Bench require Docker. Images
-  need `/bin/sh`, and the bridge and derived Hermes images must be published to a
-  registry the cluster pulls from. See the
+- The Kubernetes backend rejects tasks that expose task services, so Deep
+  Research Bench requires Docker. A task that executes as a non-root user, as
+  SWE-bench Pro does, needs `setpriv`, GNU `chroot` or `python3` in its image.
+  Images need `/bin/sh`, and the bridge and derived Hermes images must be
+  published to a registry the cluster pulls from. See the
   [Kubernetes implementation](implementation/kubernetes.md).
 - Realtime mode is OpenClaw-only and needs a separate TTS credential. See the
   [realtime setup](configuration.md#realtime-openclaw-mode).

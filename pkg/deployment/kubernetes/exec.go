@@ -32,7 +32,20 @@ const (
 	// execShell mirrors the Docker provider: the command runs in its own
 	// session so cancellation can signal the whole group, and its exit status
 	// travels in a trailer because kubectl's own failures also exit nonzero.
-	execShell       = `state=$1; token=$2; dir=$3; shift 3; umask 077; trap 'rm -f "$state" "$state.tmp"' EXIT; if [ -n "$dir" ]; then cd "$dir" || exit 126; fi; exec 3<&0; setsid "$@" <&3 & pid=$!; printf '%s\n' "$pid" >"$state.tmp" || exit 125; mv "$state.tmp" "$state" || exit 125; wait "$pid"; status=$?; rm -f "$state" "$state.tmp"; trap - EXIT; printf '\036ARIES_EXEC_EXIT_%s=%d\037' "$token" "$status" >&2; exit "$status"`
+	//
+	// kubectl exec cannot select a user, so a command for another user starts
+	// as the container's root and drops to that UID and GID here, with no
+	// supplementary groups, through whichever tool the image provides.
+	execShell = `state=$1; token=$2; dir=$3; user=$4; shift 4; umask 077; trap 'rm -f "$state" "$state.tmp"' EXIT; if [ -n "$dir" ]; then cd "$dir" || exit 126; fi; ` + dropUserShell + `exec 3<&0; setsid "$@" <&3 & pid=$!; printf '%s\n' "$pid" >"$state.tmp" || exit 125; mv "$state.tmp" "$state" || exit 125; wait "$pid"; status=$?; rm -f "$state" "$state.tmp"; trap - EXIT; printf '\036ARIES_EXEC_EXIT_%s=%d\037' "$token" "$status" >&2; exit "$status"`
+	// dropUserShell rewrites "$@" to run as $user. Each tool is probed by
+	// running it, because BusyBox ships a setpriv and a chroot without these
+	// options. HOME follows Docker, which gives an unknown UID the root directory.
+	dropUserShell = `if [ -n "$user" ] && [ "$user" != "0:0" ]; then uid=${user%%:*}; gid=${user##*:}; ` +
+		`if setpriv --reuid="$uid" --regid="$gid" --clear-groups true 2>/dev/null; then set -- setpriv --reuid="$uid" --regid="$gid" --clear-groups "$@"; ` +
+		`elif chroot --skip-chdir --userspec="$user" --groups="" / true 2>/dev/null; then set -- chroot --skip-chdir --userspec="$user" --groups="" / "$@"; ` +
+		`elif python3 -c 'import os' 2>/dev/null; then set -- python3 -c 'import os,sys;os.setgroups([]);os.setgid(int(sys.argv[2]));os.setuid(int(sys.argv[1]));os.execvp(sys.argv[3],sys.argv[3:])' "$uid" "$gid" "$@"; ` +
+		`else echo "aries: this image has no setpriv, GNU chroot or python3 to run a command as $user" >&2; exit 125; fi; ` +
+		`HOME=/; export HOME; fi; `
 	cancelExecShell = `state=$1; attempts=0; while [ ! -r "$state" ]; do attempts=$((attempts+1)); [ "$attempts" -ge 200 ] && exit 70; sleep 0.01; done; IFS= read -r pgid <"$state" || exit 71; case "$pgid" in ''|*[!0-9]*|0|1) exit 71;; esac; kill -TERM "-$pgid" 2>/dev/null || :; sleep 0.2; kill -KILL "-$pgid" 2>/dev/null || :; attempts=0; while kill -0 "-$pgid" 2>/dev/null; do attempts=$((attempts+1)); [ "$attempts" -ge 100 ] && exit 72; sleep 0.05; done; rm -f "$state"; exit 0`
 	// cancelNoState is cancelExecShell's status when the wrapper left no state:
 	// the command had already finished, or never started.
@@ -92,7 +105,7 @@ func (manager *Manager) ExecStream(ctx context.Context, id string, command core.
 	if stdin != nil {
 		args = append(args, "-i")
 	}
-	args = append(args, "--", "/bin/sh", "-c", execShell, "aries-exec", statePath, token, command.Dir)
+	args = append(args, "--", "/bin/sh", "-c", execShell, "aries-exec", statePath, token, command.Dir, command.User)
 	if len(command.Env) != 0 {
 		args = append(args, "env")
 		for _, key := range slices.Sorted(maps.Keys(command.Env)) {
@@ -298,9 +311,10 @@ func validateCommand(command core.Command) error {
 			return errors.New("invalid command workdir: path must be absolute, clean, and NUL-free")
 		}
 	}
-	// kubectl exec always runs as the container's own user.
-	if command.User != "" && command.User != "0:0" {
-		return fmt.Errorf("Kubernetes deployment cannot execute as user %q", command.User)
+	if command.User != "" {
+		if err := validateNumericUser(command.User); err != nil {
+			return fmt.Errorf("invalid command user: %w", err)
+		}
 	}
 	if command.Timeout < 0 {
 		return errors.New("command timeout must be nonnegative")

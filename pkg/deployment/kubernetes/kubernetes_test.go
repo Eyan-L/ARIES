@@ -368,11 +368,11 @@ func TestExecStreamPreservesArgvAndReadsTheExitTrailer(t *testing.T) {
 		t.Fatalf("kubectl args = %v", args[:separator])
 	}
 	remote := args[separator+1:]
-	if !slices.Equal(remote[:4], []string{"/bin/sh", "-c", execShell, "aries-exec"}) || !strings.HasPrefix(remote[4], execStatePrefix) || remote[6] != "/work dir" {
+	if !slices.Equal(remote[:4], []string{"/bin/sh", "-c", execShell, "aries-exec"}) || !strings.HasPrefix(remote[4], execStatePrefix) || remote[6] != "/work dir" || remote[7] != "" {
 		t.Fatalf("wrapper = %v", remote)
 	}
-	if !slices.Equal(remote[7:], []string{"env", "A=1 x", "B=2", "printf", "a b", "", "$HOME; rm"}) {
-		t.Fatalf("argv = %q", remote[7:])
+	if !slices.Equal(remote[8:], []string{"env", "A=1 x", "B=2", "printf", "a b", "", "$HOME; rm"}) {
+		t.Fatalf("argv = %q", remote[8:])
 	}
 
 	fake.respond = func(_ context.Context, _ []string, _ []byte, _, stderr io.Writer) error {
@@ -382,8 +382,20 @@ func TestExecStreamPreservesArgvAndReadsTheExitTrailer(t *testing.T) {
 	if result, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "true"}); err == nil || result.ExitCode != -1 || !strings.Contains(err.Error(), "unable to upgrade") {
 		t.Fatalf("transport failure = %+v, %v", result, err)
 	}
-	if _, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "true", User: "1000:1000"}); err == nil {
-		t.Fatal("non-root exec user accepted")
+	// A requested user is passed to the wrapper, which drops to it in the pod.
+	fake.calls = nil
+	fake.respond = func(_ context.Context, args []string, _ []byte, _, stderr io.Writer) error {
+		_, _ = io.WriteString(stderr, "\x1eARIES_EXEC_EXIT_"+args[slices.Index(args, "aries-exec")+2]+"=0\x1f")
+		return nil
+	}
+	if _, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "id", User: "65532:65532"}); err != nil {
+		t.Fatal(err)
+	}
+	if user := fake.calls[0][slices.Index(fake.calls[0], "aries-exec")+4]; user != "65532:65532" {
+		t.Fatalf("wrapper user = %q", user)
+	}
+	if _, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "true", User: "agent"}); err == nil {
+		t.Fatal("named exec user accepted")
 	}
 }
 
