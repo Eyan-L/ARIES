@@ -74,7 +74,7 @@ func newTestManager(t *testing.T, options Options) (*Manager, *fakeKubectl) {
 func testRequest() deployment.Request {
 	cpu, memory := 1.5, 512
 	return deployment.Request{
-		Name: "aries-task-abc123", Image: "example.test/task:1", Workdir: "/app",
+		Name: "aries-sandbox-abc123", Image: "example.test/task:1", Workdir: "/app",
 		Env: []string{"A=b=c"}, Entrypoint: []string{"/bin/sleep"}, Args: []string{"infinity"},
 		Labels:    map[string]string{"aries.managed": "true", "aries.kind": "task-container", "aries.component": "sandbox", "aries.run": "run-1", "aries.task": "task-1"},
 		Placement: core.RuntimePlacement{AttachmentID: "aries"}, CPU: &cpu, MemoryMB: &memory, NoNewPrivileges: true, ServicePort: 8443,
@@ -99,7 +99,7 @@ func TestPodManifestGatesTheRequestedCommand(t *testing.T) {
 	manifest := decodeManifest(t, raw)
 	metadata := manifest["metadata"].(map[string]any)
 	labels := metadata["labels"].(map[string]any)
-	if labels[managedByLabel] != "aries" || labels[componentLabel] != "sandbox" || labels[runtimeLabel] != "aries-task-abc123" {
+	if labels[managedByLabel] != "aries" || labels[componentLabel] != "sandbox" || labels[runtimeLabel] != "aries-sandbox-abc123" {
 		t.Fatalf("labels = %v", labels)
 	}
 	// Run and task IDs may exceed the label-value limit, so they are annotations.
@@ -185,7 +185,7 @@ func TestValidateRequestRejectsWhatTheProviderCannotHonor(t *testing.T) {
 func TestCreateWaitsForTheGateAndRecoversLostResponses(t *testing.T) {
 	manager, fake := newTestManager(t, Options{})
 	id, err := manager.Create(context.Background(), testRequest())
-	if err != nil || id != "aries-task-abc123" {
+	if err != nil || id != "aries-sandbox-abc123" {
 		t.Fatalf("Create = %q, %v", id, err)
 	}
 	if verbs := fake.verbs(); !slices.Equal(verbs, []string{"create", "wait"}) {
@@ -195,14 +195,14 @@ func TestCreateWaitsForTheGateAndRecoversLostResponses(t *testing.T) {
 		t.Fatalf("create input = %s", fake.inputs[0])
 	}
 
-	existing := `{"metadata":{"name":"aries-task-abc123","namespace":"aries","annotations":{"aries.managed":"true","aries.kind":"task-container","aries.component":"sandbox","aries.run":"run-1","aries.task":"task-1"}}}`
+	existing := `{"metadata":{"name":"aries-sandbox-abc123","namespace":"aries","annotations":{"aries.managed":"true","aries.kind":"task-container","aries.component":"sandbox","aries.run":"run-1","aries.task":"task-1"}}}`
 	for name, test := range map[string]struct {
 		pod        string
 		wantID     string
 		unresolved bool
 	}{
 		"absent":  {pod: "", wantID: ""},
-		"owned":   {pod: existing, wantID: "aries-task-abc123"},
+		"owned":   {pod: existing, wantID: "aries-sandbox-abc123"},
 		"foreign": {pod: strings.Replace(existing, "run-1", "run-2", 1), wantID: "", unresolved: true},
 	} {
 		fake.respond = func(_ context.Context, args []string, _ []byte, stdout, _ io.Writer) error {
@@ -358,13 +358,13 @@ func TestExecStreamPreservesArgvAndReadsTheExitTrailer(t *testing.T) {
 		return exitError(3)
 	}
 	command := core.Command{Path: "printf", Args: []string{"a b", "", "$HOME; rm"}, Dir: "/work dir", Env: map[string]string{"B": "2", "A": "1 x"}, Stdin: []byte("in")}
-	result, err := manager.Exec(context.Background(), "aries-task-abc123", command)
+	result, err := manager.Exec(context.Background(), "aries-sandbox-abc123", command)
 	if err != nil || result.ExitCode != 3 || result.Stdout != "out:in" || result.Stderr != "warning\n" {
 		t.Fatalf("Exec = %+v, %v", result, err)
 	}
 	args := fake.calls[0]
 	separator := slices.Index(args, "--")
-	if !slices.Equal(args[:separator], []string{"exec", "-n", "aries", "aries-task-abc123", "-c", containerName, "-i"}) {
+	if !slices.Equal(args[:separator], []string{"exec", "-n", "aries", "aries-sandbox-abc123", "-c", containerName, "-i"}) {
 		t.Fatalf("kubectl args = %v", args[:separator])
 	}
 	remote := args[separator+1:]
@@ -379,10 +379,10 @@ func TestExecStreamPreservesArgvAndReadsTheExitTrailer(t *testing.T) {
 		_, _ = io.WriteString(stderr, "error: unable to upgrade connection")
 		return exitError(1)
 	}
-	if result, err := manager.Exec(context.Background(), "aries-task-abc123", core.Command{Path: "true"}); err == nil || result.ExitCode != -1 || !strings.Contains(err.Error(), "unable to upgrade") {
+	if result, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "true"}); err == nil || result.ExitCode != -1 || !strings.Contains(err.Error(), "unable to upgrade") {
 		t.Fatalf("transport failure = %+v, %v", result, err)
 	}
-	if _, err := manager.Exec(context.Background(), "aries-task-abc123", core.Command{Path: "true", User: "1000:1000"}); err == nil {
+	if _, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "true", User: "1000:1000"}); err == nil {
 		t.Fatal("non-root exec user accepted")
 	}
 }
@@ -396,7 +396,7 @@ func TestExecStreamTerminatesTheProcessGroupOnTimeout(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	result, err := manager.Exec(context.Background(), "aries-task-abc123", core.Command{Path: "sleep", Args: []string{"60"}, Timeout: 20 * time.Millisecond})
+	result, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "sleep", Args: []string{"60"}, Timeout: 20 * time.Millisecond})
 	if !errors.Is(err, context.DeadlineExceeded) || result.ExitCode != -1 {
 		t.Fatalf("Exec = %+v, %v", result, err)
 	}
@@ -416,7 +416,7 @@ func TestExecStreamTerminatesTheProcessGroupOnTimeout(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	if _, err := manager.Exec(context.Background(), "aries-task-abc123", core.Command{Path: "sleep", Timeout: 20 * time.Millisecond}); !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "confirm") {
+	if _, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "sleep", Timeout: 20 * time.Millisecond}); !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "confirm") {
 		t.Fatalf("Exec = %v", err)
 	}
 }
@@ -433,7 +433,7 @@ func TestExecStreamBoundsOutput(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	_, err := manager.Exec(context.Background(), "aries-task-abc123", core.Command{Path: "yes", OutputLimitBytes: 16})
+	_, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "yes", OutputLimitBytes: 16})
 	if err == nil || !strings.Contains(err.Error(), "output exceeds 16 bytes") {
 		t.Fatalf("Exec = %v", err)
 	}
@@ -441,7 +441,7 @@ func TestExecStreamBoundsOutput(t *testing.T) {
 
 func TestArchiveTransfer(t *testing.T) {
 	manager, fake := newTestManager(t, Options{})
-	if err := manager.UploadArchive(context.Background(), "aries-task-abc123", "/app", strings.NewReader("tar-bytes")); err != nil {
+	if err := manager.UploadArchive(context.Background(), "aries-sandbox-abc123", "/app", strings.NewReader("tar-bytes")); err != nil {
 		t.Fatal(err)
 	}
 	upload := fake.calls[0]
@@ -460,7 +460,7 @@ func TestArchiveTransfer(t *testing.T) {
 		_, _ = io.WriteString(stdout, "tar-bytes")
 		return nil
 	}
-	stream, info, err := manager.DownloadArchive(context.Background(), "aries-task-abc123", "/app/out.txt")
+	stream, info, err := manager.DownloadArchive(context.Background(), "aries-sandbox-abc123", "/app/out.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func TestArchiveTransfer(t *testing.T) {
 		trailer(args, stderr, 1)
 		return exitError(1)
 	}
-	if _, _, err := manager.DownloadArchive(context.Background(), "aries-task-abc123", "/app/missing"); !errors.Is(err, runner.ErrNotFound) {
+	if _, _, err := manager.DownloadArchive(context.Background(), "aries-sandbox-abc123", "/app/missing"); !errors.Is(err, runner.ErrNotFound) {
 		t.Fatalf("missing source = %v", err)
 	}
 }

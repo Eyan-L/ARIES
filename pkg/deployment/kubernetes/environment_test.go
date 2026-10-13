@@ -15,7 +15,7 @@ import (
 func taskRequest(allowNetwork bool) deployment.TaskEnvironmentRequest {
 	return deployment.TaskEnvironmentRequest{
 		SandboxRequest: core.SandboxRequest{RunID: "run-1", TaskID: "task-1", Environment: core.Environment{AllowNetwork: allowNetwork}},
-		RuntimeName:    "aries-task-abc123",
+		RuntimeName:    "aries-sandbox-abc123",
 	}
 }
 
@@ -29,7 +29,7 @@ func TestTaskPolicyDeniesIngressAndScopesEgress(t *testing.T) {
 			t.Fatal(err)
 		}
 		spec := decodeManifest(t, raw)["spec"].(map[string]any)
-		if selector := spec["podSelector"].(map[string]any)["matchLabels"].(map[string]any); len(selector) != 1 || selector[runtimeLabel] != "aries-task-abc123" {
+		if selector := spec["podSelector"].(map[string]any)["matchLabels"].(map[string]any); len(selector) != 1 || selector[runtimeLabel] != "aries-sandbox-abc123" {
 			t.Fatalf("selector = %v", selector)
 		}
 		if types := spec["policyTypes"].([]any); !slices.Equal(types, []any{"Ingress", "Egress"}) {
@@ -85,10 +85,10 @@ func TestEnvironmentsOwnTheirPolicies(t *testing.T) {
 	if err != nil || connectivity.Placement.AttachmentID != "aries" || connectivity.SearchURL != "" {
 		t.Fatalf("task Start = %+v, %v", connectivity, err)
 	}
-	if !policies["aries-task-abc123"] || task.Validate(context.Background()) != nil {
+	if !policies["aries-sandbox-abc123"] || task.Validate(context.Background()) != nil {
 		t.Fatalf("task policy missing: %v", policies)
 	}
-	if err := task.Stop(context.Background()); err != nil || policies["aries-task-abc123"] {
+	if err := task.Stop(context.Background()); err != nil || policies["aries-sandbox-abc123"] {
 		t.Fatalf("task Stop = %v, policies = %v", err, policies)
 	}
 	if err := task.Validate(context.Background()); err == nil {
@@ -139,7 +139,7 @@ func TestValidateBridgeTarget(t *testing.T) {
 		"backend": func(d *core.BridgeTarget) { d.Backend = "docker" },
 		"run":     func(d *core.BridgeTarget) { d.RunID = "run-2" },
 		"task":    func(d *core.BridgeTarget) { d.TaskID = "task-2" },
-		"runtime": func(d *core.BridgeTarget) { d.RuntimeID = "aries-task-other" },
+		"runtime": func(d *core.BridgeTarget) { d.RuntimeID = "aries-sandbox-other" },
 	} {
 		other := target
 		mutate(&other)
@@ -164,7 +164,7 @@ func TestResourceSourceJoinsPodsWithKubeletSummary(t *testing.T) {
 	bridge.MemoryMB = nil
 	bridge.Labels = map[string]string{"aries.managed": "true", "aries.kind": "tool-bridge", "aries.component": "bridge", "aries.run": "run-1"}
 	other := testRequest()
-	other.Name = "aries-task-other"
+	other.Name = "aries-sandbox-other"
 	other.Labels["aries.run"] = "run-2"
 	onNode := func(m map[string]any) { m["spec"].(map[string]any)["nodeName"] = "node-a" }
 	list := `{"items":[` + podJSON(t, manager, sandbox, onNode) + `,` + podJSON(t, manager, bridge, onNode) + `,` + podJSON(t, manager, other, onNode) + `]}`
@@ -172,7 +172,7 @@ func TestResourceSourceJoinsPodsWithKubeletSummary(t *testing.T) {
 	summary := func() string {
 		stamp := observed.Format(time.RFC3339)
 		return `{"pods":[` +
-			`{"podRef":{"name":"aries-task-abc123","namespace":"aries"},"cpu":{"time":"` + stamp + `","usageCoreNanoSeconds":500},"memory":{"workingSetBytes":4096}},` +
+			`{"podRef":{"name":"aries-sandbox-abc123","namespace":"aries"},"cpu":{"time":"` + stamp + `","usageCoreNanoSeconds":500},"memory":{"workingSetBytes":4096}},` +
 			`{"podRef":{"name":"aries-bridge-1","namespace":"aries"},"cpu":{"time":"` + stamp + `","usageCoreNanoSeconds":70},"memory":{"workingSetBytes":10,"availableBytes":90}}]}`
 	}
 	fake := &fakeKubectl{respond: func(_ context.Context, args []string, _ []byte, stdout, _ io.Writer) error {
@@ -192,7 +192,7 @@ func TestResourceSourceJoinsPodsWithKubeletSummary(t *testing.T) {
 	if err != nil || len(readings) != 1 {
 		t.Fatalf("task readings = %+v, %v", readings, err)
 	}
-	if r := readings[0]; r.Scope != "task" || r.TaskID != "task-1" || r.Component != "sandbox" || r.RuntimeID != "aries-task-abc123" || r.CPUUsageNanoseconds != 500 || r.MemoryLimitBytes != 512<<20 {
+	if r := readings[0]; r.Scope != "task" || r.TaskID != "task-1" || r.Component != "sandbox" || r.RuntimeID != "aries-sandbox-abc123" || r.CPUUsageNanoseconds != 500 || r.MemoryLimitBytes != 512<<20 {
 		t.Fatalf("task reading = %+v", r)
 	}
 	// The kubelet serves a cache: an unchanged observation is not a new sample.

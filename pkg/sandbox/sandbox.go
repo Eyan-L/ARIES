@@ -176,7 +176,7 @@ func (m *Manager) Start(ctx context.Context, request core.SandboxRequest) (runne
 	}
 	s := &Sandbox{
 		owner: m, deployment: m.deployment,
-		containerName: "aries-task-" + id,
+		containerName: core.RuntimeName("sandbox", request.TaskID, id),
 		workdir:       request.Environment.Workdir, execUser: request.Environment.ExecUser,
 		artifactDir: filepath.Join(m.outputDir, request.TaskID, sandboxComponent(request)),
 		outputDir:   m.outputDir, cleanupTimeout: m.cleanupTimeout,

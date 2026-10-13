@@ -261,7 +261,7 @@ func (manager *Manager) Start(ctx context.Context, request core.HarnessRequest) 
 		return fmt.Errorf("generate Hermes harness ID: %w", err)
 	}
 	deploymentRequest := deployment.Request{
-		Name: "aries-hermes-" + id, Placement: request.Connectivity.Placement, CPU: request.CPU, MemoryMB: request.MemoryMB, ServicePort: gatewayPort, ImageVolumes: []string{imageDeclaredVolume},
+		Name: core.RuntimeName("hermes", request.TaskID, id), Placement: request.Connectivity.Placement, CPU: request.CPU, MemoryMB: request.MemoryMB, ServicePort: gatewayPort, ImageVolumes: []string{imageDeclaredVolume},
 		Image:      manager.runtime.Options.Image,
 		Workdir:    workspaceRoot,
 		Env:        environment,
@@ -275,7 +275,7 @@ func (manager *Manager) Start(ctx context.Context, request core.HarnessRequest) 
 		},
 	}
 	active := &session{
-		Occurrence: &harness.Occurrence{RunID: request.RunID, TaskID: request.TaskID, AttemptID: id, Name: "aries-hermes-" + id, DeploymentRequest: deploymentRequest, ArtifactDir: filepath.Join(manager.runtime.Options.OutputDir, request.TaskID, "harness"), Endpoint: request.Endpoint, Model: request.Model, AgentTimeout: agentTimeout},
+		Occurrence: &harness.Occurrence{RunID: request.RunID, TaskID: request.TaskID, AttemptID: id, Name: core.RuntimeName("hermes", request.TaskID, id), DeploymentRequest: deploymentRequest, ArtifactDir: filepath.Join(manager.runtime.Options.OutputDir, request.TaskID, "harness"), Endpoint: request.Endpoint, Model: request.Model, AgentTimeout: agentTimeout},
 	}
 	active.Credentials = credentials
 	active.Artifacts = &harness.Artifacts{Directory: active.ArtifactDir}

@@ -564,7 +564,7 @@ func TestHarnessUsesInjectedDeploymentAndPrivateArchive(t *testing.T) {
 	if fake.startCalls != 1 || fake.stopCalls != 1 || fake.removeCalls != 1 {
 		t.Fatalf("container lifecycle = start %d stop %d remove %d", fake.startCalls, fake.stopCalls, fake.removeCalls)
 	}
-	if fake.created.Name != "aries-openclaw-attempt" || len(fake.created.Args) == 0 {
+	if fake.created.Name != "aries-openclaw-fix-git-attempt" || len(fake.created.Args) == 0 {
 		t.Fatalf("container create = %#v", fake.created)
 	}
 	if !slices.Equal(fake.created.Args, []string{launcherPath, gatewayLauncherPath}) {

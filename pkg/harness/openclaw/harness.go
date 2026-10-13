@@ -250,7 +250,7 @@ func (manager *Manager) Start(ctx context.Context, request core.HarnessRequest) 
 		return fmt.Errorf("generate OpenClaw agent idempotency key: %w", err)
 	}
 	active := &session{
-		Occurrence: &harness.Occurrence{RunID: request.RunID, TaskID: request.TaskID, AttemptID: id, Name: "aries-openclaw-" + id, ArtifactDir: filepath.Join(manager.runtime.Options.OutputDir, request.TaskID, "harness"), Endpoint: request.Endpoint, Model: request.Model, AgentTimeout: agentTimeout},
+		Occurrence: &harness.Occurrence{RunID: request.RunID, TaskID: request.TaskID, AttemptID: id, Name: core.RuntimeName("openclaw", request.TaskID, id), ArtifactDir: filepath.Join(manager.runtime.Options.OutputDir, request.TaskID, "harness"), Endpoint: request.Endpoint, Model: request.Model, AgentTimeout: agentTimeout},
 		safeTaskID: safeTaskID(request.TaskID),
 
 		agentIdempotency: agentIdempotency,
