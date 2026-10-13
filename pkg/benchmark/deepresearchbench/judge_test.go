@@ -48,7 +48,7 @@ func TestJudgeClientGenerationSettings(t *testing.T) {
 	}{
 		{name: "defaults", provider: "openai", want: map[string]any{"temperature": float64(0)}},
 		{name: "deepseek off", provider: "deepseek", effort: "off", want: map[string]any{"temperature": float64(0), "thinking": map[string]any{"type": "disabled"}}},
-		{name: "deepseek low", provider: "deepseek", effort: "low", want: map[string]any{"thinking": map[string]any{"type": "enabled"}, "reasoning_effort": "low"}},
+		{name: "deepseek high", provider: "deepseek", effort: "high", want: map[string]any{"thinking": map[string]any{"type": "enabled"}, "reasoning_effort": "high"}},
 		{name: "openai max with overrides", provider: "openai", effort: "max", temperature: &temperature, maxTokens: 4096, want: map[string]any{"reasoning_effort": "max", "temperature": 0.4, "max_tokens": float64(4096)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

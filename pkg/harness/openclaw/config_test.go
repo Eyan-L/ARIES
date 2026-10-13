@@ -445,7 +445,7 @@ func TestRenderConfigExplicitReasoningUsesNativePayloadOverrides(t *testing.T) {
 		body                              map[string]any
 	}{
 		{"deepseek", "deepseek-flash", "off", "off", map[string]any{"thinking": map[string]any{"type": "disabled"}}},
-		{"deepseek", "deepseek-flash", "low", "low", map[string]any{"thinking": map[string]any{"type": "enabled"}, "reasoning_effort": "low"}},
+		{"deepseek", "deepseek-flash", "high", "high", map[string]any{"thinking": map[string]any{"type": "enabled"}, "reasoning_effort": "high"}},
 		{"deepseek", "deepseek-v4-pro", "max", "xhigh", map[string]any{"thinking": map[string]any{"type": "enabled"}, "reasoning_effort": "max"}},
 		{"openai", "gpt-6-luna", "medium", "medium", map[string]any{"reasoning_effort": "medium"}},
 		{"openai", "gpt-6-luna", "none", "off", map[string]any{"reasoning_effort": "none"}},

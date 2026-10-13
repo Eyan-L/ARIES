@@ -276,7 +276,7 @@ locality. See the [transport-policy gap](implementation/model-runtime.md#impleme
 ### Reasoning effort
 
 Set `model.reasoning_effort` to control the harness model in either OpenClaw or
-Hermes. For example, add `"reasoning_effort": "low"` to the existing `model` block.
+Hermes. For example, add `"reasoning_effort": "high"` to the existing `model` block.
 Use `"off"` (or the OpenAI spelling `"none"`) to disable reasoning.
 
 | Backend | Explicit values | Request mapping |
@@ -291,7 +291,9 @@ with `thinking`, `reasoning`, or `reasoning_effort` in `harness.hermes.extra_bod
 
 Omitting the field preserves existing harness behavior. OpenClaw asks its Gateway
 for thinking off for the official DeepSeek Flash/V4 models; Hermes leaves reasoning
-to its native/provider defaults. Set the field explicitly for comparable runs.
+to its native/provider defaults. Set the field explicitly for comparable runs;
+every checked-in DeepSeek profile sets `high`, DeepSeek's default effort, for the
+main model and any judge.
 The generated private `openclaw.json` or Hermes `config.yaml` records the request
 configuration; it does not prove the provider honored it.
 
@@ -319,7 +321,7 @@ The checked-in DeepSeek profile uses:
     "base_url": "https://api.deepseek.com",
     "api_key_env": "DEEPSEEK_API_KEY",
     "id": "deepseek-flash",
-    "reasoning_effort": "low"
+    "reasoning_effort": "high"
   }
 }
 ```
@@ -691,13 +693,14 @@ It additionally declares its own `provider` and optional `enabled` switch:
   "base_url": "https://api.deepseek.com",
   "api_key_env": "DEEPSEEK_API_KEY",
   "id": "deepseek-flash",
-  "reasoning_effort": "low"
+  "reasoning_effort": "high"
 }
 ```
 
 **Migration:** rename `judge.model` to `judge.id` in existing profiles. The old
-field is rejected. Checked-in profiles use explicit low judge reasoning effort;
-other omitted generation settings retain benchmark defaults.
+field is rejected. Checked-in DeepSeek profiles set judge reasoning effort to
+`high`, DeepSeek's default, explicitly; other omitted generation settings retain
+benchmark defaults.
 
 - `reasoning_effort` uses the same [values and provider mapping](#reasoning-effort)
   as the harness model and reaches the judge's Chat Completions request.

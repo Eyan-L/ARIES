@@ -45,7 +45,7 @@
     "base_url": "https://api.deepseek.com",
     "api_key_env": "DEEPSEEK_API_KEY",
     "id": "deepseek-flash",
-    "reasoning_effort": "low"
+    "reasoning_effort": "high"
   },
   "output_dir": "runs"
 }

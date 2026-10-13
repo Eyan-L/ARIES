@@ -25,10 +25,10 @@ func TestDeepResearchModelDefaultsAndDisabledJudge(t *testing.T) {
 		t.Fatalf("default models: judge=%+v fact=%+v jina=%q disabled=%v", judge, fact, jina, disabled)
 	}
 	cfg.Benchmark.Judge = &config.JudgeConfig{Provider: "deepseek", ProfileModel: config.ProfileModel{
-		ID: "judge", BaseURL: "https://api.deepseek.com", APIKeyEnv: "JUDGE_KEY", ReasoningEffort: "low", MaxTokens: 400,
+		ID: "judge", BaseURL: "https://api.deepseek.com", APIKeyEnv: "JUDGE_KEY", ReasoningEffort: "high", MaxTokens: 400,
 	}}
 	judge, fact, _, disabled = deepresearchbenchModels(cfg)
-	if judge != cfg.Benchmark.Judge.CoreModel() || judge.ReasoningEffort != "low" || fact != fallback || disabled {
+	if judge != cfg.Benchmark.Judge.CoreModel() || judge.ReasoningEffort != "high" || fact != fallback || disabled {
 		t.Fatalf("explicit judge settings lost: %+v", judge)
 	}
 	enabled := false

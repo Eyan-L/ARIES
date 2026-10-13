@@ -793,7 +793,7 @@ func TestAgentRunUsesGatewayOnceWithExactParameters(t *testing.T) {
 func TestAgentRequestsPreserveReasoningSelection(t *testing.T) {
 	for _, tc := range []struct{ modelID, effort, thinking string }{
 		{"deepseek-flash", "", "off"}, {"deepseek-v4-flash", "", "off"}, {"deepseek-v4-pro", "", "off"},
-		{"deepseek-flash", "low", "low"}, {"deepseek-v4-pro", "max", "xhigh"},
+		{"deepseek-flash", "high", "high"}, {"deepseek-v4-pro", "max", "xhigh"},
 	} {
 		for _, mode := range []string{ModeAgent, ModeVoiceTranscribe} {
 			t.Run(tc.modelID+"/"+tc.effort+"/"+mode, func(t *testing.T) {
