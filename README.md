@@ -125,8 +125,7 @@ The DeepSeek example requires an API key and can incur charges. The
 run, SGLang alternatives, result inspection, and troubleshooting.
 
 To run on a Kubernetes cluster built with Invitro's setup scripts, see
-[`k8s/`](k8s/README.md). To run the runner itself in a
-container, see [`docker/`](docker/README.md).
+[`k8s/`](k8s/README.md).
 
 For repository-level software-engineering tasks, see the
 [SWE-bench Pro guide](docs/benchmarks/swe-bench-pro.md). Its setup additionally

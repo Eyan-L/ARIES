@@ -64,3 +64,9 @@ registry.json
 !**/registry.json.example
 
 kubeconfig
+
+# Local-only setup for running the ARIES runner in a container. Dockerfile.bridge
+# is the tracked bridge image recipe and is not matched by these.
+/docker/
+/Dockerfile
+/.dockerignore
