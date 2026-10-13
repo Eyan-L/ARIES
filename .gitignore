@@ -57,6 +57,9 @@ images/**
 # named secret.yaml, and a repo-wide pattern would silently drop any such
 # template from a chart committed here.
 /k8s/aries/secret.yaml
+# The operator's own node list for k8s/create-cluster.sh. Start from
+# k8s/cluster.json.example.
+/k8s/cluster.json
 registry.json
 !**/registry.json.example
 

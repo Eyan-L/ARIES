@@ -35,7 +35,27 @@ k8s/create-cluster.sh --prometheus user@master user@runner user@worker1 user@wor
 ```
 
 As in Invitro, the first node is the control plane and the second is the loader
-node; the rest are workers. The script:
+node; the rest are workers.
+
+Or keep the nodes and settings in a file. Copy `cluster.json.example` to the
+gitignored `cluster.json`, fill it in, and run the script with no arguments:
+
+```sh
+cp k8s/cluster.json.example k8s/cluster.json
+k8s/create-cluster.sh
+```
+
+| Key | Meaning |
+| --- | --- |
+| `master`, `runner`, `workers` | SSH targets. `runner` is Invitro's loader node |
+| `runner_dir` | Directory under the runner's home that receives ARIES; default `aries` |
+| `ssh_key`, `ssh_options` | Identity file and extra `ssh` options, applied to every connection including Invitro's |
+| `deploy_prometheus` | Same as `--prometheus` |
+| `node_setup` | Same as `--node-setup` |
+
+`--config FILE` names another file, and command-line options win over the file.
+
+The script:
 
 1. checks out Invitro at the revision pinned at the top of the script into
    `.cache/invitro` and runs its `create_multinode_cluster` against the nodes;

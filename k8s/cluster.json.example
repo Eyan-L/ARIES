@@ -1,0 +1,10 @@
+{
+  "master": "username@master-node",
+  "runner": "username@runner-node",
+  "workers": ["username@worker-1", "username@worker-2"],
+  "runner_dir": "aries",
+  "ssh_key": "",
+  "ssh_options": ["-o", "ConnectTimeout=15"],
+  "deploy_prometheus": false,
+  "node_setup": ""
+}

@@ -11,19 +11,28 @@ set -euo pipefail
 INVITRO_REPO=${INVITRO_REPO:-https://github.com/vhive-serverless/invitro.git}
 INVITRO_REVISION=${INVITRO_REVISION:-49c90dfd977417a32ff4dbd767a8a82e794480b4}
 
+config=""
 prometheus=false
 node_setup=""
 skip_cluster=false
 stage_runner=true
+runner_dir=aries
+ssh_key=""
+ssh_options=()
 
 usage() {
   cat <<'USAGE'
-Usage: k8s/create-cluster.sh [options] <master> <runner> [<worker> ...]
+Usage: k8s/create-cluster.sh [options] [<master> <runner> [<worker> ...]]
 
 Nodes are SSH targets such as user@host. As in Invitro, the first is the
 control plane and the second is the loader node, which joins the cluster and is
 where the ARIES runner is staged; the rest are workers.
 
+With no nodes on the command line, they and the settings below are read from a
+JSON file: k8s/cluster.json, or the one --config names. Start from
+k8s/cluster.json.example. Command-line options win over the file.
+
+  --config FILE       read nodes and settings from FILE
   --prometheus        also deploy kube-prometheus-stack and the ARIES overlay
   --node-setup FILE   an Invitro node_setup.json, for nodes whose internal
                       addresses are not Invitro's default 10.0.1.x layout
@@ -38,6 +47,7 @@ USAGE
 nodes=()
 while [ $# -gt 0 ]; do
   case "$1" in
+    --config) config=$2; shift 2 ;;
     --prometheus) prometheus=true; shift ;;
     --node-setup) node_setup=$2; shift 2 ;;
     --skip-cluster) skip_cluster=true; shift ;;
@@ -47,16 +57,82 @@ while [ $# -gt 0 ]; do
     *) nodes+=("$1"); shift ;;
   esac
 done
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+for tool in git go ssh python3; do
+  command -v "$tool" >/dev/null || { echo "$tool is required on PATH" >&2; exit 1; }
+done
+
+# The file supplies whatever the command line left unset.
+if [ -z "$config" ] && [ ${#nodes[@]} -eq 0 ] && [ -f "$root/k8s/cluster.json" ]; then
+  config="$root/k8s/cluster.json"
+fi
+if [ -n "$config" ]; then
+  [ -f "$config" ] || { echo "cluster config $config not found" >&2; exit 1; }
+  echo "==> Reading $config"
+  # Values are shell-quoted by Python, so nothing in the file is interpreted.
+  parsed=$(python3 - "$config" <<'PY'
+import json, shlex, sys
+
+with open(sys.argv[1]) as handle:
+    cfg = json.load(handle)
+
+def text(key):
+    value = cfg.get(key, "")
+    if not isinstance(value, str):
+        sys.exit(f"{key} must be a string")
+    return value
+
+def strings(key):
+    value = cfg.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        sys.exit(f"{key} must be a list of strings")
+    return value
+
+if not text("master") or not text("runner"):
+    sys.exit('cluster config needs "master" and "runner"')
+nodes = [text("master"), text("runner")] + strings("workers")
+print("file_nodes=(" + " ".join(shlex.quote(node) for node in nodes) + ")")
+print("file_ssh_options=(" + " ".join(shlex.quote(option) for option in strings("ssh_options")) + ")")
+for key in ("runner_dir", "ssh_key", "node_setup"):
+    print(f"file_{key}={shlex.quote(text(key))}")
+print("file_prometheus=" + ("true" if cfg.get("deploy_prometheus") is True else "false"))
+PY
+  ) || exit 1
+  eval "$parsed"
+  [ ${#nodes[@]} -gt 0 ] || nodes=("${file_nodes[@]}")
+  ssh_options=(${file_ssh_options[@]+"${file_ssh_options[@]}"})
+  [ -z "$file_runner_dir" ] || runner_dir=$file_runner_dir
+  ssh_key=$file_ssh_key
+  [ -n "$node_setup" ] || node_setup=$file_node_setup
+  [ "$prometheus" = true ] || prometheus=$file_prometheus
+fi
+
 [ ${#nodes[@]} -ge 2 ] || { usage >&2; exit 2; }
 master=${nodes[0]}
 runner=${nodes[1]}
+case "$runner_dir" in
+  ""|/*|*..*|*[!A-Za-z0-9._/-]*) echo "runner_dir must be a simple path under the runner's home" >&2; exit 1 ;;
+esac
 
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# Invitro calls plain `ssh`, so a key and options from the config are applied
+# through a shim placed first on PATH for the rest of this script.
+if [ -n "$ssh_key" ] || [ ${#ssh_options[@]} -gt 0 ]; then
+  real_ssh=$(command -v ssh)
+  shim=$(mktemp -d)
+  {
+    printf '#!/bin/sh\nexec %q' "$real_ssh"
+    [ -z "$ssh_key" ] || printf ' -i %q -o IdentitiesOnly=yes' "${ssh_key/#\~/$HOME}"
+    [ ${#ssh_options[@]} -eq 0 ] || printf ' %q' "${ssh_options[@]}"
+    printf ' "$@"\n'
+  } >"$shim/ssh"
+  chmod +x "$shim/ssh"
+  PATH="$shim:$PATH"
+fi
+cleanup() { rm -rf "${shim:-}" "${configs:-}" "${stage:-}"; }
+trap cleanup EXIT
+
 remote() { ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$@"; }
-
-for tool in git go ssh; do
-  command -v "$tool" >/dev/null || { echo "$tool is required on PATH" >&2; exit 1; }
-done
 for node in "${nodes[@]}"; do
   remote "$node" true || { echo "cannot ssh to $node non-interactively" >&2; exit 1; }
 done
@@ -75,7 +151,6 @@ if [ "$skip_cluster" = false ]; then
   # Invitro reads its settings from a config directory. Work on a private copy
   # of its own defaults so the checkout stays pristine.
   configs=$(mktemp -d)
-  trap 'rm -rf "$configs"' EXIT
   cp -R "$invitro/scripts/setup/configs/." "$configs/"
   if [ "$prometheus" = true ]; then
     sed 's/"DEPLOY_PROMETHEUS": *false/"DEPLOY_PROMETHEUS": true/' \
@@ -114,9 +189,8 @@ if [ "$stage_runner" = true ]; then
     aarch64|arm64) arch=arm64 ;;
     *) echo "unsupported runner architecture" >&2; exit 1 ;;
   esac
-  echo "==> Building the runner for linux/$arch and staging it to $runner:~/aries"
+  echo "==> Building the runner for linux/$arch and staging it to $runner:~/$runner_dir"
   stage=$(mktemp -d)
-  trap 'rm -rf "${configs:-}" "$stage"' EXIT
   mkdir -p "$stage/bin"
   for command in aries aries-ssh-client; do
     (cd "$root" && CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o "$stage/bin/$command" "./cmd/$command")
@@ -124,10 +198,10 @@ if [ "$stage_runner" = true ]; then
   git -C "$root" archive HEAD profiles configs | tar -xf - -C "$stage"
   # Only bin/, profiles/ and configs/ are replaced; runs/, .cache/ and the
   # model key on the runner are kept.
-  COPYFILE_DISABLE=1 tar -C "$stage" -cf - bin profiles configs | remote "$runner" '
-    mkdir -p ~/aries && cd ~/aries && rm -rf bin profiles configs && tar -xf -'
+  COPYFILE_DISABLE=1 tar -C "$stage" -cf - bin profiles configs | remote "$runner" "
+    mkdir -p ~/$runner_dir && cd ~/$runner_dir && rm -rf bin profiles configs && tar -xf -"
   # The token passes through a pipe, never a command line or a local file.
-  remote "$master" 'cat ~/aries-kubeconfig' | remote "$runner" 'umask 077; cat > ~/aries/kubeconfig'
+  remote "$master" 'cat ~/aries-kubeconfig' | remote "$runner" "umask 077; cat > ~/$runner_dir/kubeconfig"
 fi
 
 echo
@@ -135,6 +209,6 @@ echo "Cluster ready. Next:"
 echo "  1. Publish the bridge image for the Kubernetes version printed above (k8s/README.md)."
 echo "  2. Set pod_cidr and service_cidr in the profile to the values printed above."
 if [ "$stage_runner" = true ]; then
-  echo "  3. scp DEEPSEEK_API.key $runner:aries/ && ssh $runner chmod 600 aries/DEEPSEEK_API.key"
-  echo "  4. ssh $runner 'cd ~/aries && KUBECONFIG=\$PWD/kubeconfig ./bin/aries profiles/openclaw-tb2-fix-git-deepseek-k8s-pods.json'"
+  echo "  3. scp DEEPSEEK_API.key $runner:$runner_dir/ && ssh $runner chmod 600 $runner_dir/DEEPSEEK_API.key"
+  echo "  4. ssh $runner 'cd ~/$runner_dir && KUBECONFIG=\$PWD/kubeconfig ./bin/aries profiles/openclaw-tb2-fix-git-deepseek-k8s-pods.json'"
 fi
