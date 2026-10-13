@@ -1,5 +1,4 @@
-# The ARIES runner in a container, for hosts that cannot build or run bin/aries
-# natively, such as macOS.
+# The ARIES runner in a container.
 #
 #   docker compose -f docker/docker-compose.yml run --rm aries
 #

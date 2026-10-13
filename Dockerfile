@@ -3,9 +3,8 @@
 # runtimes are siblings: containers through the mounted Docker socket, or pods
 # through kubectl. This image therefore bundles neither Node nor benchmark
 # images.
-# Run the builder on the host's native architecture and cross-compile to the
-# target arch. This avoids emulating the Go compiler (which hangs under qemu),
-# so building a linux/amd64 image on an arm64 Mac stays fast.
+# Run the builder on the build host's native architecture and cross-compile to
+# the target architecture, so the Go compiler never runs under emulation.
 FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64

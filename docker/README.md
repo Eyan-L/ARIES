@@ -4,9 +4,8 @@ ARIES normally runs as a host process: `make build`, then `./bin/aries <profile>
 It starts every harness, task sandbox and the run's tool bridge as containers on
 one Docker Engine. See the [quick start](../docs/quick-start.md).
 
-This directory holds a Compose file that runs the runner itself in a container,
-for hosts that cannot build or run `bin/aries` natively, such as macOS. For a
-Kubernetes cluster, see [`k8s/`](../k8s/README.md) instead.
+This directory holds a Compose file that runs the runner itself in a container.
+For a Kubernetes cluster, see [`k8s/`](../k8s/README.md) instead.
 
 Run every command below from the repository root.
 
@@ -29,10 +28,9 @@ siblings on the host daemon, not nested containers. It uses host networking
 because the runner reaches the harness gateway and the bridge's control port on
 ports published to host loopback.
 
-`Dockerfile` cross-compiles on the host's native architecture, so building the
-image on Apple Silicon does not emulate the Go compiler. The image carries
-`bin/aries`, `bin/aries-ssh-client`, `bin/aries-bridge` and `Dockerfile.bridge`,
-which the runner uses to build the bridge image on the host daemon.
+The image carries `bin/aries`, `bin/aries-ssh-client`, `bin/aries-bridge` and
+`Dockerfile.bridge`, which the runner uses to build the bridge image on the host
+daemon.
 
 Mounting the Docker socket gives the runner container control of the host
 daemon. That is the same authority a host-run `bin/aries` has.
