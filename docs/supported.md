@@ -44,7 +44,8 @@ guides above.
   `bin/aries-ssh` beside `bin/aries`.
 - Checkpoint sandbox lifecycle needs Docker experimental mode and CRIU on the
   host, and cannot run Deep Research Bench tasks with their search service or GPU
-  tasks. It has unit coverage only; no CRIU-backed integration run is recorded.
+  tasks. `TestDockerSandboxCheckpointRestorePreservesProcessState` checks host
+  support; no CRIU-backed run is recorded yet.
 - Realtime mode is OpenClaw-only and needs a separate TTS credential. See the
   [realtime setup](configuration.md#realtime-openclaw-mode).
 - External model servers are operated separately from ARIES. ARIES does not
