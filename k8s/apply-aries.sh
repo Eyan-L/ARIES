@@ -88,6 +88,8 @@ if [ -n "$runner_kubeconfig" ]; then
   [ -n "$token" ] || { echo "secret $namespace/$secret has no token" >&2; exit 1; }
   ca=$(kubectl -n "$namespace" get secret "$secret" -o jsonpath='{.data.ca\.crt}')
   server=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+  # Remove any earlier file first: writing in place would keep a looser mode.
+  rm -f "$runner_kubeconfig"
   ( umask 077
     cat >"$runner_kubeconfig" <<KUBECONFIG
 apiVersion: v1

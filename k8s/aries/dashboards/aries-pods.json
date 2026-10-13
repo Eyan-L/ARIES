@@ -1,7 +1,7 @@
 {
   "uid": "aries-pods",
   "title": "ARIES / Pods",
-  "description": "CPU, memory and CFS throttling for ARIES pods, from the kubelet's cAdvisor endpoint. Scraped every 10s, which is finer and steadier than the kubelet Summary API that ARIES samples into resources.jsonl.",
+  "description": "CPU, memory and CFS throttling for ARIES pods, from the kubelet's cAdvisor endpoint, scraped every second by the ARIES monitoring overlay. The Recorder reads the same series into resources.jsonl.",
   "tags": ["aries"],
   "editable": true,
   "schemaVersion": 39,

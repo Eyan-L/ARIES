@@ -48,7 +48,7 @@ serviceAccount:
 # The ARIES Grafana dashboard, shipped as a ConfigMap for Grafana's dashboard
 # sidecar to pick up. It plots CPU, memory and CFS throttling for pods in this
 # namespace (bridge, harness and sandbox pods) from the kubelet's cAdvisor
-# endpoint, which kube-prometheus-stack already scrapes every 10s. The runner
+# endpoint, which the ARIES monitoring overlay scrapes every second. The runner
 # is a host process, so it does not appear.
 #
 # On by default: the ConfigMap is inert without the monitoring stack. It does

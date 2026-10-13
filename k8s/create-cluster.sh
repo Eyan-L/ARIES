@@ -250,7 +250,7 @@ for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.json"))):
 PY
   fi
   # The token passes through a pipe, never a command line or a local file.
-  remote "$master" 'cat ~/aries-kubeconfig' | remote "$runner" "umask 077; cat > ~/$runner_dir/kubeconfig"
+  remote "$master" 'cat ~/aries-kubeconfig' | remote "$runner" "umask 077; rm -f ~/$runner_dir/kubeconfig; cat > ~/$runner_dir/kubeconfig"
 fi
 
 echo
