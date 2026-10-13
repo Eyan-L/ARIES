@@ -198,7 +198,7 @@ if [ "$stage_runner" = true ]; then
   git -C "$root" archive HEAD profiles configs | tar -xf - -C "$stage"
   # Only bin/, profiles/ and configs/ are replaced; runs/, .cache/ and the
   # model key on the runner are kept.
-  COPYFILE_DISABLE=1 tar -C "$stage" -cf - bin profiles configs | remote "$runner" "
+  COPYFILE_DISABLE=1 tar --no-xattrs -C "$stage" -cf - bin profiles configs | remote "$runner" "
     mkdir -p ~/$runner_dir && cd ~/$runner_dir && rm -rf bin profiles configs && tar -xf -"
   # The token passes through a pipe, never a command line or a local file.
   remote "$master" 'cat ~/aries-kubeconfig' | remote "$runner" "umask 077; cat > ~/$runner_dir/kubeconfig"

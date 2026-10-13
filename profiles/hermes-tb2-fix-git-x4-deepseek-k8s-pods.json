@@ -23,6 +23,9 @@
         "namespace": "aries",
         "images": {
           "aries-local/hermes": "docker.io/jingxiang212/aries-hermes"
+        },
+        "node_selector": {
+          "loader-nodetype": "worker"
         }
       }
     }
@@ -32,8 +35,11 @@
       "backend": "kubernetes",
       "kubernetes": {
         "namespace": "aries",
-        "pod_cidr": "192.168.0.0/16",
-        "service_cidr": "10.96.0.0/12"
+        "pod_cidr": "10.168.0.0/16",
+        "service_cidr": "10.96.0.0/12",
+        "node_selector": {
+          "loader-nodetype": "worker"
+        }
       }
     }
   },
@@ -45,6 +51,9 @@
         "service_account": "aries-bridge",
         "images": {
           "aries-bridge": "docker.io/jingxiang212/aries-bridge"
+        },
+        "node_selector": {
+          "loader-nodetype": "worker"
         }
       }
     },
