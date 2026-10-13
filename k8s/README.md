@@ -194,10 +194,10 @@ kubectl -n aries get pods -l app.kubernetes.io/managed-by=aries -o wide
 
 ## Status and caveats
 
-- **Supported set.** Terminal-Bench 2 and SWE-bench Pro, with OpenClaw or Hermes
-  in text mode. See
-  [the Kubernetes implementation](../docs/implementation/kubernetes.md) for why
-  Deep Research Bench is not, and for what SWE-bench Pro needs from a task image.
+- **Supported set.** Terminal-Bench 2, SWE-bench Pro and Deep Research Bench,
+  with OpenClaw or Hermes in text mode. See
+  [the Kubernetes implementation](../docs/implementation/kubernetes.md) for what
+  SWE-bench Pro needs from a task image and how a task service is exposed.
 - **Task network isolation** depends on the CNI enforcing NetworkPolicy. Calico
   does; under flannel the policies are created and silently ignored.
 - **Pod resource metrics** are read from Prometheus, so they need the

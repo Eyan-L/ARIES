@@ -110,7 +110,7 @@ func TestEnvironmentsOwnTheirPolicies(t *testing.T) {
 	}
 }
 
-func TestTaskEnvironmentRejectsForeignRunsAndTaskServices(t *testing.T) {
+func TestTaskEnvironmentRejectsForeignRuns(t *testing.T) {
 	manager, _ := newTestManager(t, Options{})
 	run := manager.NewRunEnvironment("run-1")
 	if _, err := run.Start(context.Background()); err != nil {
@@ -121,10 +121,68 @@ func TestTaskEnvironmentRejectsForeignRunsAndTaskServices(t *testing.T) {
 	if _, err := run.NewTaskEnvironment().Start(context.Background(), foreign); err == nil {
 		t.Fatal("foreign run accepted")
 	}
-	search := taskRequest(true)
-	search.Environment.Services.SearchPort = 8080
-	if _, err := run.NewTaskEnvironment().Start(context.Background(), search); err == nil || !strings.Contains(err.Error(), "task services") {
-		t.Fatalf("task service = %v", err)
+}
+
+// A declared task service is the only way into a sandbox: harness pods may
+// reach that one port through a Service named after the sandbox.
+func TestTaskEnvironmentExposesADeclaredTaskService(t *testing.T) {
+	manager, fake := newTestManager(t, Options{})
+	objects := map[string]bool{}
+	var manifests []map[string]any
+	fake.respond = func(_ context.Context, args []string, stdin []byte, stdout, _ io.Writer) error {
+		switch args[0] {
+		case "create":
+			manifest := decodeManifest(t, stdin)
+			manifests = append(manifests, manifest)
+			objects[strings.ToLower(manifest["kind"].(string))+"/"+manifest["metadata"].(map[string]any)["name"].(string)] = true
+		case "delete":
+			delete(objects, args[1]+"/"+args[4])
+		case "get":
+			if objects[args[1]+"/"+args[4]] {
+				_, _ = io.WriteString(stdout, args[1]+"/"+args[4])
+			}
+		}
+		return nil
+	}
+	run := manager.NewRunEnvironment("run-1")
+	if _, err := run.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	request := taskRequest(true)
+	request.Environment.Services.SearchPort = 8888
+	task := run.NewTaskEnvironment()
+	connectivity, err := task.Start(context.Background(), request)
+	if err != nil || connectivity.SearchURL != "http://aries-sandbox-abc123:8888" {
+		t.Fatalf("Start = %+v, %v", connectivity, err)
+	}
+	if !objects["networkpolicy/aries-sandbox-abc123"] || !objects["service/aries-sandbox-abc123"] {
+		t.Fatalf("objects = %v", objects)
+	}
+	policy, service := manifests[1]["spec"].(map[string]any), manifests[2]["spec"].(map[string]any)
+	ingress := policy["ingress"].([]any)
+	rule := ingress[0].(map[string]any)
+	from := rule["from"].([]any)[0].(map[string]any)["podSelector"].(map[string]any)["matchLabels"].(map[string]any)
+	port := rule["ports"].([]any)[0].(map[string]any)
+	if len(ingress) != 1 || from[componentLabel] != "harness" || from[managedByLabel] != "aries" || port["port"] != float64(8888) || port["protocol"] != "TCP" {
+		t.Fatalf("ingress = %v", ingress)
+	}
+	if selector := service["selector"].(map[string]any); len(selector) != 1 || selector[runtimeLabel] != "aries-sandbox-abc123" {
+		t.Fatalf("service selector = %v", selector)
+	}
+	if target := service["ports"].([]any)[0].(map[string]any); target["port"] != float64(8888) || target["targetPort"] != float64(8888) {
+		t.Fatalf("service ports = %v", service["ports"])
+	}
+	if err := task.Stop(context.Background()); err != nil || objects["service/aries-sandbox-abc123"] || objects["networkpolicy/aries-sandbox-abc123"] {
+		t.Fatalf("Stop = %v, objects = %v", err, objects)
+	}
+	// Without a declared service, nothing is admitted and no Service exists.
+	manifests = nil
+	plain := run.NewTaskEnvironment()
+	if connectivity, err := plain.Start(context.Background(), taskRequest(true)); err != nil || connectivity.SearchURL != "" {
+		t.Fatalf("plain Start = %+v, %v", connectivity, err)
+	}
+	if _, admitted := manifests[0]["spec"].(map[string]any)["ingress"]; admitted || len(manifests) != 1 {
+		t.Fatalf("plain task created %d objects", len(manifests))
 	}
 }
 

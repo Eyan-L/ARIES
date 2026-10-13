@@ -110,11 +110,13 @@ func (e *RunEnvironment) Stop(ctx context.Context) error {
 	return nil
 }
 
-// taskEnvironment owns the NetworkPolicy that isolates one sandbox pod.
+// taskEnvironment owns the NetworkPolicy that isolates one sandbox pod, and the
+// Service that exposes the sandbox's task services to the harness.
 type taskEnvironment struct {
 	mu               sync.Mutex
 	owner            *RunEnvironment
 	policy           string
+	service          string
 	started, stopped bool
 }
 
@@ -130,8 +132,9 @@ func (e *taskEnvironment) Start(ctx context.Context, request deployment.TaskEnvi
 	if request.RunID != e.owner.runID || !validName(request.RuntimeName) {
 		return core.HarnessConnectivity{}, errors.New("task environment requires its run and a unique runtime name")
 	}
-	if request.Environment.Services.SearchPort != 0 {
-		return core.HarnessConnectivity{}, errors.New("Kubernetes deployment does not expose task services to the harness")
+	port := request.Environment.Services.SearchPort
+	if port < 0 || port > 65535 {
+		return core.HarnessConnectivity{}, errors.New("invalid task search service port")
 	}
 	if err := e.owner.validate(); err != nil {
 		return core.HarnessConnectivity{}, err
@@ -141,11 +144,28 @@ func (e *taskEnvironment) Start(ctx context.Context, request deployment.TaskEnvi
 	if err != nil {
 		return core.HarnessConnectivity{}, err
 	}
+	// Ownership is retained before each create, so Stop cleans up even when a
+	// response is lost.
 	e.policy = request.RuntimeName
 	if _, err := manager.run(ctx, manifest, "create", "-n", manager.options.Namespace, "-f", "-"); err != nil {
 		return core.HarnessConnectivity{}, fmt.Errorf("create Kubernetes task network policy: %w", err)
 	}
-	return core.HarnessConnectivity{Placement: core.RuntimePlacement{AttachmentID: manager.options.Namespace}}, nil
+	result := core.HarnessConnectivity{Placement: core.RuntimePlacement{AttachmentID: manager.options.Namespace}}
+	if port == 0 {
+		return result, nil
+	}
+	// The harness needs the address before the sandbox pod exists, so the
+	// service gets a stable name: the same one Docker resolves on its network.
+	service, err := manager.taskServiceManifest(request, port)
+	if err != nil {
+		return core.HarnessConnectivity{}, err
+	}
+	e.service = request.RuntimeName
+	if _, err := manager.run(ctx, service, "create", "-n", manager.options.Namespace, "-f", "-"); err != nil {
+		return core.HarnessConnectivity{}, fmt.Errorf("create Kubernetes task service: %w", err)
+	}
+	result.SearchURL = fmt.Sprintf("http://%s:%d", request.RuntimeName, port)
+	return result, nil
 }
 
 func (e *taskEnvironment) Validate(ctx context.Context) error {
@@ -176,6 +196,12 @@ func (e *taskEnvironment) Stop(ctx context.Context) error {
 	if e.stopped {
 		return nil
 	}
+	if e.service != "" {
+		if err := e.owner.manager.deleteObject(ctx, "service", e.service); err != nil {
+			return err
+		}
+		e.service = ""
+	}
 	if e.policy != "" {
 		if err := e.owner.manager.deletePolicy(ctx, e.policy); err != nil {
 			return err
@@ -186,18 +212,39 @@ func (e *taskEnvironment) Stop(ctx context.Context) error {
 }
 
 func (manager *Manager) deletePolicy(ctx context.Context, name string) error {
+	return manager.deleteObject(ctx, "networkpolicy", name)
+}
+
+// deleteObject removes one namespaced object and confirms that it is gone.
+func (manager *Manager) deleteObject(ctx context.Context, kind, name string) error {
 	namespace := manager.options.Namespace
-	if _, err := manager.run(ctx, nil, "delete", "networkpolicy", "-n", namespace, name, "--ignore-not-found"); err != nil {
-		return fmt.Errorf("delete Kubernetes network policy: %w", err)
+	if _, err := manager.run(ctx, nil, "delete", kind, "-n", namespace, name, "--ignore-not-found"); err != nil {
+		return fmt.Errorf("delete Kubernetes %s: %w", kind, err)
 	}
-	remaining, err := manager.run(ctx, nil, "get", "networkpolicy", "-n", namespace, name, "--ignore-not-found", "-o", "name")
+	remaining, err := manager.run(ctx, nil, "get", kind, "-n", namespace, name, "--ignore-not-found", "-o", "name")
 	if err != nil {
-		return fmt.Errorf("verify Kubernetes network policy removal: %w", err)
+		return fmt.Errorf("verify Kubernetes %s removal: %w", kind, err)
 	}
 	if strings.TrimSpace(string(remaining)) != "" {
-		return fmt.Errorf("Kubernetes network policy %q remains after removal", name)
+		return fmt.Errorf("Kubernetes %s %q remains after removal", kind, name)
 	}
 	return nil
+}
+
+// taskServiceManifest gives one sandbox's task service a cluster address.
+func (manager *Manager) taskServiceManifest(request deployment.TaskEnvironmentRequest, port int) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"apiVersion": "v1", "kind": "Service",
+		"metadata": map[string]any{
+			"name": request.RuntimeName, "namespace": manager.options.Namespace,
+			"labels":      map[string]string{managedByLabel: "aries", componentLabel: "sandbox", runtimeLabel: request.RuntimeName},
+			"annotations": map[string]string{"aries.kind": "task-service", "aries.run": request.RunID, "aries.task": request.TaskID},
+		},
+		"spec": map[string]any{
+			"selector": map[string]string{runtimeLabel: request.RuntimeName},
+			"ports":    []any{map[string]any{"name": "search", "protocol": "TCP", "port": port, "targetPort": port}},
+		},
+	})
 }
 
 // taskPolicyManifest isolates one sandbox pod. Every sandbox gets a policy;
@@ -212,6 +259,11 @@ func (manager *Manager) deletePolicy(ctx context.Context, name string) error {
 // task may send. The bridge needs none either, because it reaches the sandbox
 // through the API server's exec endpoint.
 //
+// The one exception is a declared task service, such as a benchmark's search
+// engine: harness pods may reach that port and nothing else. Pods carry their
+// role but not their task as a label, so this admits every harness in the
+// namespace, as Docker's shared run network does.
+//
 // Naming a direction in policyTypes with no rule block denies it; an empty rule
 // list would instead permit everything.
 func (manager *Manager) taskPolicyManifest(request deployment.TaskEnvironmentRequest) ([]byte, error) {
@@ -221,6 +273,12 @@ func (manager *Manager) taskPolicyManifest(request deployment.TaskEnvironmentReq
 	}
 	if request.Environment.AllowNetwork {
 		spec["egress"] = egressRules(manager.options.PodCIDR, manager.options.ServiceCIDR)
+	}
+	if port := request.Environment.Services.SearchPort; port != 0 {
+		spec["ingress"] = []any{map[string]any{
+			"from":  []any{map[string]any{"podSelector": map[string]any{"matchLabels": map[string]string{managedByLabel: "aries", componentLabel: "harness"}}}},
+			"ports": []any{map[string]any{"protocol": "TCP", "port": port}},
+		}}
 	}
 	return json.Marshal(map[string]any{
 		"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
