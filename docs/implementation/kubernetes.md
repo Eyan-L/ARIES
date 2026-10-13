@@ -10,9 +10,50 @@ bootstrap, the Helm chart and the runner host are covered in
 
 ## Placement
 
-The Runner stays a host process outside the cluster and reaches it only through
-the `kubectl` binary and the context that resolves. Every runtime is one pod in
-a single namespace:
+The Runner is a host process, not a pod. It reaches the cluster only through the
+`kubectl` binary and the context that resolves, from Invitro's loader node or
+from any machine with a route to the API server. Every runtime is one pod in a
+single namespace:
+
+```mermaid
+flowchart LR
+    M[Model API]
+
+    subgraph HOST[Runner host]
+        R[ARIES process<br/>Runner and Recorder]
+    end
+
+    subgraph CLUSTER[Kubernetes cluster]
+        API[API server]
+        PROM[Prometheus]
+
+        subgraph NS[Namespace aries]
+            B[Bridge pod<br/>one per run]
+
+            subgraph TASK[One per task occurrence]
+                H[Harness pod<br/>OpenClaw or Hermes]
+                S[Sandbox pod<br/>task image]
+                NP{{NetworkPolicy<br/>deny ingress}}
+            end
+        end
+    end
+
+    R -- "kubectl: create, exec, delete pods and policies" --> API
+    R -. "port-forward: gateway" .-> H
+    R -. "port-forward: gRPC control" .-> B
+    R -. "pod metrics" .-> PROM
+    H -- "model requests" --> M
+    H -- "SSH tool calls" --> B
+    B -- "kubectl exec" --> API
+    API -- "exec" --> S
+    NP -.- S
+```
+
+Solid arrows are the paths a task uses; dotted arrows are the Runner's own
+control and measurement connections.
+Nothing connects to a sandbox pod directly: the bridge and the Runner reach it
+through the API server's exec endpoint, which is why its NetworkPolicy can deny
+all ingress.
 
 | Runtime | Lifetime | Reached by |
 | --- | --- | --- |
@@ -90,9 +131,14 @@ itself exits nonzero on transport failures, which would otherwise be
 indistinguishable from a failing command. Cancellation and timeouts signal the
 recorded process group and confirm it is gone before returning.
 
-`kubectl exec` cannot select a user, so a command that requests a non-root
-`User` is rejected. SWE-bench Pro, which executes as a dedicated agent user, is
-therefore unsupported on this backend.
+`kubectl exec` cannot select a user; a command always starts as the container's
+own user. SWE-bench Pro runs the agent's commands as UID 65532 and ARIES's own
+as root, so a command that requests another user starts as root and the wrapper
+drops to the requested UID and GID, with no supplementary groups, before running
+it. It uses the first of `setpriv`, GNU `chroot --userspec` or `python3` that
+works in the image, and fails with a clear error when none does. The sandbox
+container must therefore start as root. `HOME` is set to `/` for such a command,
+as Docker does for a UID with no account.
 
 Archives move as tar streams over exec. Pod logs are a single interleaved
 stream, so they arrive on stdout only.
@@ -111,7 +157,7 @@ A cluster has one flat pod network, so isolation is expressed with
 NetworkPolicy. The task environment creates each sandbox's policy before its pod
 and removes it after the pod is gone:
 
-| `allow_internet` | Ingress | Egress |
+| `allow_network` | Ingress | Egress |
 | --- | --- | --- |
 | `false` | Denied | Denied |
 | `true` | Denied | DNS, and the internet outside `pod_cidr` and `service_cidr` |
@@ -129,15 +175,56 @@ namespace that are not sandboxes. The reported run policy is
 NetworkPolicy is enforced by the CNI plugin. Under one that does not implement
 it, such as flannel, the objects are accepted and silently ignored.
 
-Task services are not exposed: a task whose environment declares a search port
-is rejected, so Deep Research Bench is unsupported on this backend.
+A task may declare a service that the harness must reach, as Deep Research Bench
+does for the search engine it starts inside the sandbox. The task environment
+then also creates a Service named after the sandbox, so the harness has a stable
+address before the pod exists (`http://<sandbox name>:<port>`, the same form
+Docker resolves on its run network), and the sandbox's policy gains one ingress
+rule admitting harness pods to that port only. Pods carry their role as a label
+but not their task, so the rule admits every harness in the namespace, as
+Docker's shared network does. The Service is removed with the policy.
+
+## Pod names, labels and annotations
+
+Each component names its own runtime as `aries-<role>-<task>-<random>`, and the
+provider uses that name as the pod name. The names are the same ones Docker
+containers get:
+
+| Pod | Name | Example |
+| --- | --- | --- |
+| Sandbox | `aries-sandbox-<task>-<16 hex>` | `aries-sandbox-fix-git-001-03cfd3ce39bab2f8` |
+| OpenClaw harness | `aries-openclaw-<task>-<16 hex>` | `aries-openclaw-fix-git-001-3964909f9e34fd0d` |
+| Hermes harness | `aries-hermes-<task>-<16 hex>` | `aries-hermes-fix-git-001-5b1e7c2a90d4f316` |
+| Bridge | `aries-bridge-<24 hex>` | `aries-bridge-8019af64fc4a734d411b564d` |
+
+The prefix gives the role. The task part is a readable hint only: a pod name is
+limited to 63 lowercase letters, digits and hyphens, so the task ID is
+lowercased, every other character becomes a hyphen, and the result is cut at 24
+characters. Two tasks can therefore share it. The random suffix is what makes
+the name unique, so every task occurrence gets a fresh identity, including
+repeated task IDs running at the same time. The bridge serves the whole run and
+carries no task. The exact task and run IDs are recorded on the pod instead.
+
+The provider sets three labels, which selectors and `kubectl` filters use:
+
+| Label | Value |
+| --- | --- |
+| `app.kubernetes.io/managed-by` | `aries` |
+| `app.kubernetes.io/component` | `sandbox`, `evaluation-sandbox`, `harness` or `bridge` |
+| `aries.dev/runtime` | The pod's own name, so a NetworkPolicy can select exactly one pod |
+
+The component's ownership metadata is stored as annotations: `aries.managed`,
+`aries.kind`, `aries.component`, `aries.run`, `aries.task`, and for harnesses
+`aries.attempt`. These are annotations rather than labels because a label value
+is limited to 63 characters, while a run ID may be 128 characters and a task ID
+149. To see which task a pod belongs to:
+
+```sh
+kubectl -n aries get pods -l app.kubernetes.io/managed-by=aries \
+  -o custom-columns='NAME:.metadata.name,TASK:.metadata.annotations.aries\.task'
+```
 
 ## Ownership and cleanup
-
-Pods carry three labels: `app.kubernetes.io/managed-by=aries`, the component,
-and `aries.dev/runtime` with the pod's own random name. Run and task IDs can
-exceed the 63-byte label limit, so the request's ownership labels are stored as
-annotations and matched there.
 
 `Validate` checks the pod against its request: identity, annotations, image,
 gated command, working directory, privilege escalation, host namespaces, host
@@ -155,29 +242,93 @@ behind; remove them by label as shown in [`k8s/`](../../k8s/README.md).
 ## Images
 
 The cluster pulls images; ARIES cannot build into it. Image preparation is
-therefore a no-op on this backend, and two images that Docker runs build locally
-must be published first: the bridge image, which additionally needs `kubectl`,
-and the derived Hermes image. Each deployment block's `images` map translates a
-local name to the reference the cluster pulls.
+therefore a no-op on this backend. Both harnesses are supported; they differ
+only in which images must be published beforehand:
+
+| Image | Source | Needed for | Publish first? |
+| --- | --- | --- | --- |
+| Task sandbox | Public, pinned by the benchmark | Both harnesses | No |
+| OpenClaw harness | Public upstream image, used unchanged | OpenClaw | No |
+| Hermes harness | Upstream image plus `hermes-otel`, built by ARIES | Hermes | Yes |
+| Bridge | Built by ARIES; needs `kubectl` on this backend | Both harnesses | Yes |
+
+An OpenClaw run therefore needs only the bridge image published, and a Hermes
+run needs the bridge and the derived Hermes image. Each deployment block's
+`images` map translates a locally built name to the reference the cluster pulls.
 
 ## Resource measurements
 
-Readings come from the kubelet Summary API through the API server's node proxy.
-It reports a cumulative CPU counter, which is what the monitor's rate arithmetic
-needs, and one request per node covers every pod on it.
+The Recorder runs inside the `aries` process on the runner host, not in the
+cluster. It is deployment-neutral: each provider hands it a resource source, and
+it writes the same `resources.jsonl` whatever the backend. The Kubernetes source
+is in [`resources.go`](../../pkg/deployment/kubernetes/resources.go).
 
-The kubelet serves a cache refreshed every 10 to 20 seconds. The source
-therefore declares a five-second minimum sample interval, emits a reading only
-when the observation time advances, and asks the recorder to keep a CPU baseline
-across those gaps. `second` in `resources.jsonl` is elapsed time, so samples
-stay comparable across intervals. A few consecutive discovery failures are
-absorbed as missing samples rather than ending the run's telemetry.
+### Where the readings come from
 
-This needs `get` on the cluster-scoped `nodes/proxy`, the one permission the
-Runner holds outside its namespace.
+Readings are cAdvisor data, read from Prometheus. cAdvisor is built into the
+kubelet on every node and reads each pod's cgroup counters; Prometheus scrapes
+them from the kubelet's `/metrics/cadvisor` endpoint, and the same series feed
+the Grafana dashboard. ARIES keeps no collection path of its own beside that.
+
+On each sample the source runs three instant queries against the server named
+by `prometheus_url`, summed per pod over the namespace:
+
+| Reading | Query |
+| --- | --- |
+| Cumulative CPU | `container_cpu_usage_seconds_total` |
+| Memory | `container_memory_working_set_bytes` |
+| Observation time | `timestamp()` of the CPU series, the moment it was scraped |
+
+Prometheus identifies a pod by name only, while the run and task it belongs to
+are in its annotations. The source therefore lists pods through `kubectl`, but
+only when Prometheus reports a pod name it has not classified yet. Annotations
+never change, so in the steady state a sample is HTTP alone.
+
+Node exporter is not a substitute: it reports whole-node figures, not per-pod
+ones.
+
+### What it depends on
+
+- **The monitoring stack.** Without a `prometheus_url` the measurements are
+  recorded as unsupported and the run continues; nothing is fabricated.
+- **A reachable address.** `k8s/apply-aries.sh` prints the Prometheus Service's
+  cluster address. A cluster node reaches it directly, which is why the runner
+  on Invitro's loader node needs no port-forward. A runner outside the cluster
+  would need its own route to Prometheus.
+
+### Freshness
+
+Two intervals bound how fine the data is, and the coarser one wins:
+
+| Interval | Stock Invitro cluster | With ARIES applied |
+| --- | --- | --- |
+| Kubelet housekeeping, when cAdvisor refreshes the counters | 10 seconds | `kubelet_housekeeping_interval` in `cluster.json`, such as `1s` |
+| Prometheus scrape of cAdvisor | 15 seconds | 1 second, from the monitoring overlay |
+
+Scraping every second does not help while the kubelet refreshes every ten, so
+one-second measurements need both. A dashboard panel drawn at a one-second step
+only interpolates between whatever samples exist.
+
+Even with both set to one second, samples do not land on a one-second grid. The
+kubelet's cAdvisor adds up to one interval of jitter to every refresh, so an
+active pod is observed every one to two seconds. It also backs off while a
+container's counters are not changing, up to about 15 seconds before jitter, so
+an idle pod is observed far less often. Neither behaviour is configurable in the
+kubelet. Each line of `resources.jsonl` is one real observation at its own
+timestamp; nothing is repeated to fill the gaps, and because the CPU counter is
+cumulative, the rate between two observations stays exact however far apart
+they are.
+
+The source records a reading only when the scrape time has advanced, so a
+repeated value is never counted twice, and asks the Recorder to keep a pod's CPU
+baseline across samples that carry nothing new. `second` in `resources.jsonl` is
+elapsed time, so samples stay comparable across intervals. A pod without a
+memory limit reports `memory_limit_bytes` 0. A few consecutive pod-listing
+failures are absorbed as missing samples rather than ending the run's telemetry.
 
 ## Supported composition
 
-Terminal-Bench 2 with OpenClaw or Hermes in text mode, with all three components
-on one cluster and namespace. Realtime and voice modes, managed model runtimes,
-GPU tasks and the other benchmarks have not been exercised on this backend.
+Terminal-Bench 2, SWE-bench Pro and Deep Research Bench with OpenClaw or Hermes
+in text mode, with all three components on one cluster and namespace. Realtime and voice modes, managed
+model runtimes, GPU tasks and the other benchmarks have not been exercised on
+this backend.

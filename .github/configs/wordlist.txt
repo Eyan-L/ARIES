@@ -219,3 +219,6 @@ kubelet's
 namespace
 namespaces
 init
+cgroup
+prometheus
+grafana

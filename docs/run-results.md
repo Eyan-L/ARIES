@@ -90,9 +90,10 @@ still a real sample with status `succeeded`.
 Each sample's `second`, and the index's `first_second` and `last_second`, are
 whole seconds elapsed since monitoring started, not a count of samples
 (`schema_version` 5). Docker is sampled every second. The Kubernetes source
-reads a kubelet cache that refreshes every 10 to 20 seconds, so it samples at
-most every five seconds and records a sample only when the observation advances;
-`interval_milliseconds` in the index shows the interval used.
+reads Prometheus, whose figures the kubelet refreshes on its housekeeping
+interval (10 seconds by default), and records a sample only when the scraped
+observation advances. See
+[Kubernetes resource measurements](implementation/kubernetes.md#resource-measurements).
 
 Docker sampling can overlap runtime teardown. If a stats response lacks its
 observation timestamp, ARIES checks the same runtime again and skips that sample
@@ -104,7 +105,7 @@ tasks. Its samples and index are under
 `infrastructure/bridge/monitor/`, with component `bridge`, `scope: "run"`, and
 `run_id`; they contain no `task_id`. Per-task monitor files contain only that
 task's harness, sandbox, evaluation sandbox, and configured GPU observations,
-with `scope: "task"`, `run_id`, and `task_id`. Index schema version 4 distinguishes
+with `scope: "task"`, `run_id`, and `task_id`. The index `scope` field distinguishes
 the two scopes. CPU percentages use differences between cumulative CPU usage
 and observation times; the first sample for each runtime is a zero baseline.
 Shared costs are not duplicated or apportioned across tasks. See the
