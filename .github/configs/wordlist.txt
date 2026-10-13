@@ -222,3 +222,7 @@ init
 cgroup
 prometheus
 grafana
+invitro
+invitro's
+jitter
+lowercased
