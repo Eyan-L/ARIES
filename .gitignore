@@ -50,9 +50,6 @@ DEEPSEEK.key
 # Deep Research Sandbox Dockerfile
 images/**
 
-# aries-setup writes a command log to the directory it runs in.
-aries-setup-*.log
-
 # Credentials for the ARIES chart: the model API key and the registry document.
 # Start from k8s/aries/secret.yaml.example.
 #

@@ -9,10 +9,8 @@ The bridge pod runs as ServiceAccount {{ include "aries.bridge.fullname" . }}. P
   "bridge": {"deployment": {"backend": "kubernetes", "kubernetes": {"service_account": "{{ include "aries.bridge.fullname" . }}"}}}
 {{- end }}
 
-The runner is not in the cluster. Set up its host from your machine with
+The runner is a host process, not a pod. Build ARIES where kubectl reaches this
+cluster, then run a Kubernetes profile:
 
-  go run ./k8s/setup/aries-setup setup_runner
-
-then, on that host,
-
-  cd ~/aries && ./bin/aries profiles/hermes-tb2-fix-git-deepseek-k8s-pods.json
+  make build
+  ./bin/aries profiles/hermes-tb2-fix-git-deepseek-k8s-pods.json

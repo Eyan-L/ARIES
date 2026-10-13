@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint integration run setup setup-tool charts-lint charts-template
+.PHONY: build test test-race lint integration run setup charts-lint charts-template
 
 PROFILE ?= profiles/openclaw-tb2-fix-git-deepseek.json
 
@@ -56,20 +56,10 @@ proto:
 bridge-image: build
 	go run ./scripts/build-bridge-image
 
-# Cluster setup tool: a host binary for create_cluster, and a static linux
-# binary to copy onto nodes when running the on-node subcommands by hand.
-setup-tool:
-	mkdir -p bin
-	go build -o bin/aries-setup ./k8s/setup/aries-setup
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/aries-setup-linux-amd64 ./k8s/setup/aries-setup
-
-# Render the charts without a cluster. Catches template errors and, with
+# Render the chart without a cluster. Catches template errors and, with
 # --dry-run, schema problems that only show up once values are merged.
 # HELM is the helm binary to use; override it if yours is not on PATH.
 HELM ?= helm
-# kube-prometheus-stack is pulled from its registry, pinned in prom_config.json.
-PROM_CHART = $(shell jq -r '.chart_ref + ":" + .chart_version + "@" + .chart_digest' k8s/setup/configs/prometheus/prom_config.json)
-
 charts-lint:
 	$(HELM) lint ./k8s/aries
 
@@ -78,6 +68,4 @@ charts-template:
 	  -f ./k8s/aries/values-local.yaml >/dev/null
 	$(HELM) template aries ./k8s/aries -n aries \
 	  -f ./k8s/aries/values-cluster.yaml --set registry.dockerconfigjson='{}' >/dev/null
-	$(HELM) template prometheus $(PROM_CHART) -n monitoring \
-	  -f ./k8s/prometheus/values.yaml -f ./k8s/grafana/values.yaml >/dev/null
 	@echo "charts render"

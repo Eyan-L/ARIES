@@ -124,8 +124,8 @@ The DeepSeek example requires an API key and can incur charges. The
 [Quick start](docs/quick-start.md) covers secure credential setup, the first
 run, SGLang alternatives, result inspection, and troubleshooting.
 
-To run on a Kubernetes cluster, see [`k8s/`](k8s/README.md), which also covers
-bootstrapping a cluster with `aries-setup`. To run the runner itself in a
+To run on a Kubernetes cluster built with Invitro's setup scripts, see
+[`k8s/`](k8s/README.md). To run the runner itself in a
 container, see [`docker/`](docker/README.md).
 
 For repository-level software-engineering tasks, see the

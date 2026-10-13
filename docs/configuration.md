@@ -187,7 +187,7 @@ all select this backend and the same namespace; mixed compositions are rejected.
 | Field | Applies to | Meaning |
 | --- | --- | --- |
 | `namespace` | all | Namespace for every pod and policy. Defaults to `aries`; must match across the three blocks. |
-| `node_role` | all | Pins pods to nodes labelled `aries.dev/role=<value>` and tolerates the matching `NoSchedule` taint. |
+| `node_selector` | all | Labels a node must carry to host the pods, for example `{"loader-nodetype": "worker"}`. Unset leaves pods unpinned. |
 | `pod_cidr`, `service_cidr` | sandbox | Cluster networks a network-allowed sandbox is kept off. Unset leaves that egress open. |
 | `service_account` | bridge | Account the bridge pod uses to exec into sandbox pods. Defaults to `aries-bridge`. |
 | `image_pull_secret` | all | Registry credential Secret in the namespace. |

@@ -14,9 +14,6 @@ import (
 )
 
 const (
-	// nodeRoleLabel is the label k8s/setup puts on each dedicated node pool, and
-	// the key of the NoSchedule taint it pairs with.
-	nodeRoleLabel  = "aries.dev/role"
 	managedByLabel = "app.kubernetes.io/managed-by"
 	componentLabel = "app.kubernetes.io/component"
 	// runtimeLabel carries the pod's own random name. Request labels may exceed
@@ -29,16 +26,23 @@ var (
 	dnsLabel     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 	dnsSubdomain = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
 	labelValue   = regexp.MustCompile(`^[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$`)
+	// labelKey is an optional DNS-subdomain prefix and a name of up to 63 characters.
+	labelKey = regexp.MustCompile(`^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$`)
 )
 
 func validName(value string) bool      { return dnsLabel.MatchString(value) }
 func validSubdomain(value string) bool { return dnsSubdomain.MatchString(value) }
 
-// validateNodeRole keeps the configured role within the label-value grammar, so
+// validateNodeSelector keeps the configured labels within the label grammar, so
 // an invalid profile fails at construction rather than at the first pod.
-func validateNodeRole(role string) error {
-	if role != "" && !labelValue.MatchString(role) {
-		return fmt.Errorf("Kubernetes node role %q is not a label value", role)
+func validateNodeSelector(selector map[string]string) error {
+	for key, value := range selector {
+		if !labelKey.MatchString(key) || len(key) > 317 {
+			return fmt.Errorf("Kubernetes node selector key %q is not a label key", key)
+		}
+		if value != "" && !labelValue.MatchString(value) {
+			return fmt.Errorf("Kubernetes node selector value %q is not a label value", value)
+		}
 	}
 	return nil
 }
@@ -206,11 +210,8 @@ func (manager *Manager) podManifest(request deployment.Request) ([]byte, error) 
 			"volumeMounts":    stagingMounts,
 		}}
 	}
-	// Both halves are required: the selector pulls the pod onto a labelled node
-	// and the toleration gets it past the taint that keeps everything else off.
-	if role := manager.options.NodeRole; role != "" {
-		spec["nodeSelector"] = map[string]string{nodeRoleLabel: role}
-		spec["tolerations"] = []any{map[string]any{"key": nodeRoleLabel, "operator": "Equal", "value": role, "effect": "NoSchedule"}}
+	if len(manager.options.NodeSelector) != 0 {
+		spec["nodeSelector"] = manager.options.NodeSelector
 	}
 	metadata := map[string]any{"name": request.Name, "namespace": manager.options.Namespace, "labels": labels}
 	if len(request.Labels) != 0 {

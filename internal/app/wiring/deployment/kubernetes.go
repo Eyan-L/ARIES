@@ -12,7 +12,7 @@ import (
 func kubernetesOptions(cfg config.DeploymentConfig, logger *logrus.Logger) kubernetesdeployment.Options {
 	k := cfg.Kubernetes
 	return kubernetesdeployment.Options{
-		Namespace: k.Namespace, NodeRole: k.NodeRole, PodCIDR: k.PodCIDR, ServiceCIDR: k.ServiceCIDR,
+		Namespace: k.Namespace, NodeSelector: k.NodeSelector, PodCIDR: k.PodCIDR, ServiceCIDR: k.ServiceCIDR,
 		ServiceAccount: k.ServiceAccount, ImagePullSecret: k.ImagePullSecret, Images: k.Images, Logger: logger,
 	}
 }

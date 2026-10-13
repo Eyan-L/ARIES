@@ -91,7 +91,7 @@ func decodeManifest(t *testing.T, raw []byte) map[string]any {
 }
 
 func TestPodManifestGatesTheRequestedCommand(t *testing.T) {
-	manager, _ := newTestManager(t, Options{NodeRole: "sandbox", ImagePullSecret: "registry"})
+	manager, _ := newTestManager(t, Options{NodeSelector: map[string]string{"loader-nodetype": "worker"}, ImagePullSecret: "registry"})
 	raw, err := manager.podManifest(testRequest())
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestPodManifestGatesTheRequestedCommand(t *testing.T) {
 	if spec["restartPolicy"] != "Never" || spec["automountServiceAccountToken"] != false || spec["enableServiceLinks"] != false {
 		t.Fatalf("spec = %v", spec)
 	}
-	if selector := spec["nodeSelector"].(map[string]any); selector[nodeRoleLabel] != "sandbox" || len(spec["tolerations"].([]any)) != 1 {
+	if selector := spec["nodeSelector"].(map[string]any); len(selector) != 1 || selector["loader-nodetype"] != "worker" || spec["tolerations"] != nil {
 		t.Fatalf("node placement = %v", spec)
 	}
 	if _, present := spec["initContainers"]; present {
@@ -499,7 +499,8 @@ func TestParseStatAndMemoryQuantity(t *testing.T) {
 func TestNewRejectsInvalidOptions(t *testing.T) {
 	for name, options := range map[string]Options{
 		"namespace":     {Namespace: "Not_A_Label"},
-		"node role":     {NodeRole: "-bad"},
+		"selector key":  {NodeSelector: map[string]string{"bad key": "worker"}},
+		"selector val":  {NodeSelector: map[string]string{"loader-nodetype": "-bad"}},
 		"staging path":  {StagingDirs: []string{"relative"}, StagingOwner: "1000:1000"},
 		"staging owner": {StagingDirs: []string{"/run/aries"}, StagingOwner: "node"},
 	} {

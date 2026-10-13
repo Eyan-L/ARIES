@@ -1,8 +1,7 @@
 # Defaults for the ARIES chart.
 #
 # The chart deploys what ARIES needs *inside* the cluster. The runner itself is
-# not here: it runs as a process on a host outside the cluster (see
-# `aries-setup setup_runner`) and reaches the cluster with kubectl.
+# not here: it runs as a host process and reaches the cluster with kubectl.
 #
 #   - the runner's ServiceAccount, its namespaced Role and a token for it
 #   - the tool bridge's ServiceAccount and Role (the runner creates one bridge
@@ -47,8 +46,8 @@ rbac:
   nodeMetrics: true
 
 serviceAccount:
-  # The runner's identity, plus a long-lived token Secret setup_runner builds
-  # the runner host's kubeconfig from.
+  # The runner's identity, plus a long-lived token Secret that
+  # `k8s/apply-aries.sh --runner-kubeconfig` builds a kubeconfig from.
   create: true
   name: aries
 

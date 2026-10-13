@@ -52,9 +52,9 @@ type commandRunner interface {
 type Options struct {
 	// Namespace holds every pod, NetworkPolicy and Service this transport owns.
 	Namespace string
-	// NodeRole pins pods to nodes labelled aries.dev/role=<NodeRole> and
-	// tolerates the matching NoSchedule taint. Empty leaves pods unpinned.
-	NodeRole string
+	// NodeSelector pins pods to nodes carrying every listed label. Empty leaves
+	// pods unpinned.
+	NodeSelector map[string]string
 	// PodCIDR and ServiceCIDR are excluded from the egress a network-allowed
 	// task receives, keeping it off the cluster's own networks.
 	PodCIDR, ServiceCIDR string
@@ -103,7 +103,7 @@ func New(options Options) (*Manager, error) {
 	if !validName(options.Namespace) {
 		return nil, fmt.Errorf("Kubernetes namespace %q is not a DNS label", options.Namespace)
 	}
-	if err := validateNodeRole(options.NodeRole); err != nil {
+	if err := validateNodeSelector(options.NodeSelector); err != nil {
 		return nil, err
 	}
 	for _, name := range []string{options.ServiceAccount, options.ImagePullSecret} {

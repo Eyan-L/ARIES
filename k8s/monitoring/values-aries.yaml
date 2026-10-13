@@ -1,0 +1,26 @@
+# ARIES overlay for an existing kube-prometheus-stack release, such as the one
+# Invitro's scripts/setup installs. Apply it with `k8s/apply-aries.sh
+# --monitoring`, which upgrades the release in place and keeps its other values.
+
+# cAdvisor is the scrape that matters for ARIES: it carries the per-pod CPU,
+# memory and throttling series the dashboard plots. One second resolves a tool
+# call; the stack's default hides it.
+#
+# A scrape is only as fresh as the kubelet's cAdvisor housekeeping, which is 10s
+# unless the kubelet runs with --housekeeping-interval. Without that flag a 1s
+# scrape mostly re-reads the same observation.
+kubelet:
+  serviceMonitor:
+    cAdvisor: true
+    cAdvisorInterval: 1s
+
+grafana:
+  sidecar:
+    dashboards:
+      enabled: true
+      # The ARIES dashboard ConfigMap lives in the ARIES namespace, not the
+      # monitoring one, so the sidecar must look everywhere.
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
