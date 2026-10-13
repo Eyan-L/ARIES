@@ -5,6 +5,7 @@
   "runner_dir": "aries",
   "ssh_key": "",
   "ssh_options": ["-o", "ConnectTimeout=15"],
-  "deploy_prometheus": false,
+  "deploy_prometheus": true,
+  "kubelet_housekeeping_interval": "1s",
   "node_setup": ""
 }

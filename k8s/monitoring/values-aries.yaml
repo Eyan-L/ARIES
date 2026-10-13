@@ -8,9 +8,14 @@
 #
 # A scrape is only as fresh as the kubelet's cAdvisor housekeeping, which is 10s
 # unless the kubelet runs with --housekeeping-interval. Without that flag a 1s
-# scrape mostly re-reads the same observation.
+# scrape mostly re-reads the same observation. k8s/create-cluster.sh sets it
+# from kubelet_housekeeping_interval in cluster.json.
 kubelet:
   serviceMonitor:
+    # Invitro sets one interval for every kubelet endpoint, and the chart lets
+    # that override cAdvisorInterval. Clearing it is what makes the line below
+    # take effect; the other endpoints fall back to the global scrape interval.
+    interval: ""
     cAdvisor: true
     cAdvisorInterval: 1s
 

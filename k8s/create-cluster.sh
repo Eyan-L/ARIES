@@ -19,6 +19,7 @@ stage_runner=true
 runner_dir=aries
 ssh_key=""
 ssh_options=()
+housekeeping=""
 
 usage() {
   cat <<'USAGE'
@@ -36,6 +37,8 @@ k8s/cluster.json.example. Command-line options win over the file.
   --prometheus        also deploy kube-prometheus-stack and the ARIES overlay
   --node-setup FILE   an Invitro node_setup.json, for nodes whose internal
                       addresses are not Invitro's default 10.0.1.x layout
+  --housekeeping DUR  set the kubelet's --housekeeping-interval on every node,
+                      such as 1s; Invitro leaves the 10s default
   --skip-cluster      the cluster already exists; only apply ARIES
   --no-runner         do not build and stage the runner on the loader node
   -h, --help          show this help
@@ -50,6 +53,7 @@ while [ $# -gt 0 ]; do
     --config) config=$2; shift 2 ;;
     --prometheus) prometheus=true; shift ;;
     --node-setup) node_setup=$2; shift 2 ;;
+    --housekeeping) housekeeping=$2; shift 2 ;;
     --skip-cluster) skip_cluster=true; shift ;;
     --no-runner) stage_runner=false; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -94,7 +98,7 @@ if not text("master") or not text("runner"):
 nodes = [text("master"), text("runner")] + strings("workers")
 print("file_nodes=(" + " ".join(shlex.quote(node) for node in nodes) + ")")
 print("file_ssh_options=(" + " ".join(shlex.quote(option) for option in strings("ssh_options")) + ")")
-for key in ("runner_dir", "ssh_key", "node_setup"):
+for key in ("runner_dir", "ssh_key", "node_setup", "kubelet_housekeeping_interval"):
     print(f"file_{key}={shlex.quote(text(key))}")
 print("file_prometheus=" + ("true" if cfg.get("deploy_prometheus") is True else "false"))
 PY
@@ -106,7 +110,12 @@ PY
   ssh_key=$file_ssh_key
   [ -n "$node_setup" ] || node_setup=$file_node_setup
   [ "$prometheus" = true ] || prometheus=$file_prometheus
+  [ -n "$housekeeping" ] || housekeeping=$file_kubelet_housekeeping_interval
 fi
+case "$housekeeping" in
+  ""|[1-9]s|[1-9][0-9]s|[1-9][0-9][0-9]ms) ;;
+  *) echo "kubelet housekeeping interval must look like 1s or 500ms" >&2; exit 1 ;;
+esac
 
 [ ${#nodes[@]} -ge 2 ] || { usage >&2; exit 2; }
 master=${nodes[0]}
@@ -168,6 +177,25 @@ if [ "$skip_cluster" = false ]; then
     (cd "$invitro/scripts/setup" && go run . -setup-type create_multinode_cluster \
       -config-dir "$configs" "${nodes[@]}")
   fi
+fi
+
+if [ -n "$housekeeping" ]; then
+  # cAdvisor refreshes container counters on this interval, so it bounds how
+  # fine pod measurements can be however often Prometheus scrapes them.
+  echo "==> Setting the kubelet housekeeping interval to $housekeeping on every node"
+  for node in "${nodes[@]}"; do
+    remote "$node" "
+      set -e
+      file=/etc/default/kubelet
+      if sudo grep -q -- '--housekeeping-interval=$housekeeping\\b' \$file 2>/dev/null; then exit 0; fi
+      if sudo grep -q '^KUBELET_EXTRA_ARGS=' \$file 2>/dev/null; then
+        sudo sed -i -E 's/ ?--housekeeping-interval=[^\" ]*//; s/^(KUBELET_EXTRA_ARGS=\".*)\"\$/\\1 --housekeeping-interval=$housekeeping\"/' \$file
+      else
+        echo 'KUBELET_EXTRA_ARGS=\"--housekeeping-interval=$housekeeping\"' | sudo tee -a \$file >/dev/null
+      fi
+      sudo systemctl restart kubelet
+    "
+  done
 fi
 
 echo "==> Applying ARIES on $master"

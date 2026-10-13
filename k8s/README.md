@@ -51,6 +51,7 @@ k8s/create-cluster.sh
 | `runner_dir` | Directory under the runner's home that receives ARIES; default `aries` |
 | `ssh_key`, `ssh_options` | Identity file and extra `ssh` options, applied to every connection including Invitro's |
 | `deploy_prometheus` | Same as `--prometheus` |
+| `kubelet_housekeeping_interval` | Same as `--housekeeping`; `1s` gives one-second pod measurements |
 | `node_setup` | Same as `--node-setup` |
 
 `--config FILE` names another file, and command-line options win over the file.
@@ -68,6 +69,7 @@ The script:
 | --- | --- |
 | `--prometheus` | Sets Invitro's `DEPLOY_PROMETHEUS` and applies the ARIES monitoring overlay |
 | `--node-setup FILE` | Uses your own Invitro `node_setup.json`; needed when the nodes' internal addresses are not Invitro's default `10.0.1.x` layout |
+| `--housekeeping DUR` | Sets the kubelet's `--housekeeping-interval` on every node and restarts it. Invitro leaves the 10-second default, which caps how fine pod measurements can be |
 | `--skip-cluster` | The cluster exists already; only apply ARIES and restage the runner |
 | `--no-runner` | Do not build or stage the runner |
 
@@ -92,7 +94,7 @@ k8s/apply-aries.sh --monitoring --runner-kubeconfig ~/aries-kubeconfig
 | Option | Effect |
 | --- | --- |
 | *(none)* | Installs the chart into namespace `aries`: the runner's and the bridge's service accounts and Roles, and the dashboard ConfigMap |
-| `--monitoring` | Upgrades the existing kube-prometheus-stack release in place with [`monitoring/values-aries.yaml`](monitoring/values-aries.yaml): cAdvisor scraped every second, and the Grafana sidecar reading dashboards from every namespace |
+| `--monitoring` | Upgrades the existing kube-prometheus-stack release in place with [`monitoring/values-aries.yaml`](monitoring/values-aries.yaml): cAdvisor scraped every second instead of Invitro's 15, and the Grafana sidecar reading dashboards from every namespace |
 | `--runner-kubeconfig PATH` | Writes a kubeconfig for the chart's `aries` ServiceAccount, so the runner holds the namespaced Role rather than cluster-admin |
 | `--values FILE` | Extra chart values, such as a `secret.yaml` for a private registry |
 | `--namespace NAME` | A namespace other than `aries`; set the same one in the profile |
@@ -201,7 +203,9 @@ kubectl -n aries get pods -l app.kubernetes.io/managed-by=aries -o wide
   monitoring stack and a `prometheus_url` in the profile; without one they are
   recorded as unsupported and the run continues. The kubelet refreshes these
   figures every 10 seconds unless it runs with `--housekeeping-interval`, so
-  that is their resolution on a stock Invitro cluster.
+  that is their resolution on a stock Invitro cluster. Set
+  `kubelet_housekeeping_interval` to `1s` for one-second data, in the dashboard
+  and in `resources.jsonl` alike.
 - **One bridge pod per run.** If it dies mid-run, the tasks in flight lose
   their tool access and their evidence, and evaluation is blocked for them.
 - **An interrupted runner can leave pods behind.** Remove them with
