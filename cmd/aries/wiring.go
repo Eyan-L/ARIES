@@ -185,7 +185,10 @@ func newSharedBridge(cfg config.Config, runID, outputRoot string, placement core
 	case "docker":
 		launch.ResourceMetrics = "docker-stats"
 	case "kubernetes":
-		launch.ResourceMetrics = "kubelet-summary"
+		launch.ResourceMetrics = "unsupported"
+		if cfg.Sandbox.Deployment.Kubernetes.PrometheusURL != "" {
+			launch.ResourceMetrics = "prometheus"
+		}
 	}
 	// Sandbox execution access is selected independently of bridge placement.
 	launch.Config.Backend = cfg.Sandbox.Deployment.Backend
@@ -361,7 +364,7 @@ func newInfrastructure(cfg config.Config, runID, outputRoot string, logger *logr
 			return nil, err
 		}
 		environment := owner.NewRunEnvironment(runID)
-		resources, err := deploymentwiring.NewKubernetesRunResources(cfg.Bridge.Deployment, runID)
+		resources, err := deploymentwiring.NewKubernetesRunResources(cfg.Sandbox.Deployment, runID)
 		if err != nil {
 			return nil, errors.Join(err, owner.Close())
 		}

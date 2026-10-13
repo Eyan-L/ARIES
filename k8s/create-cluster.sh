@@ -129,7 +129,7 @@ if [ -n "$ssh_key" ] || [ ${#ssh_options[@]} -gt 0 ]; then
   chmod +x "$shim/ssh"
   PATH="$shim:$PATH"
 fi
-cleanup() { rm -rf "${shim:-}" "${configs:-}" "${stage:-}"; }
+cleanup() { rm -rf "${shim:-}" "${configs:-}" "${stage:-}" "${applied:-}"; }
 trap cleanup EXIT
 
 remote() { ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$@"; }
@@ -175,13 +175,15 @@ apply_args=(--runner-kubeconfig '$HOME/aries-kubeconfig')
 [ "$prometheus" = false ] || apply_args+=(--monitoring)
 # Ship the committed k8s/ tree only, so local credentials never leave this
 # machine. Invitro installs helm with Prometheus; install it otherwise.
+applied=$(mktemp)
 git -C "$root" archive HEAD k8s | remote "$master" "
   set -e
   rm -rf ~/aries-k8s && mkdir -p ~/aries-k8s && tar -xf - -C ~/aries-k8s
   command -v helm >/dev/null ||
     curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
   ~/aries-k8s/k8s/apply-aries.sh ${apply_args[*]}
-"
+" | tee "$applied"
+prometheus_url=$(sed -n 's/^  prometheus_url  *: //p' "$applied")
 
 if [ "$stage_runner" = true ]; then
   case "$(remote "$runner" uname -m)" in
@@ -200,6 +202,25 @@ if [ "$stage_runner" = true ]; then
   # model key on the runner are kept.
   COPYFILE_DISABLE=1 tar --no-xattrs -C "$stage" -cf - bin profiles configs | remote "$runner" "
     mkdir -p ~/$runner_dir && cd ~/$runner_dir && rm -rf bin profiles configs && tar -xf -"
+  if [ -n "$prometheus_url" ]; then
+    # The Service address differs per cluster, so it is written into the staged
+    # Kubernetes profiles rather than committed.
+    echo "==> Pointing the staged profiles at Prometheus ($prometheus_url)"
+    remote "$runner" "python3 - ~/$runner_dir/profiles $prometheus_url" <<'PY'
+import glob, json, os, sys
+
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.json"))):
+    with open(path) as handle:
+        profile = json.load(handle)
+    placement = profile.get("sandbox", {}).get("deployment", {})
+    if placement.get("backend") != "kubernetes":
+        continue
+    placement.setdefault("kubernetes", {})["prometheus_url"] = sys.argv[2]
+    with open(path, "w") as handle:
+        json.dump(profile, handle, indent=2)
+        handle.write("\n")
+PY
+  fi
   # The token passes through a pipe, never a command line or a local file.
   remote "$master" 'cat ~/aries-kubeconfig' | remote "$runner" "umask 077; cat > ~/$runner_dir/kubeconfig"
 fi

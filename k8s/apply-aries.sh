@@ -52,8 +52,8 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 for tool in kubectl helm; do
   command -v "$tool" >/dev/null || { echo "$tool is required on PATH" >&2; exit 1; }
 done
-kubectl auth can-i create clusterroles >/dev/null 2>&1 ||
-  { echo "kubectl must reach the cluster as an admin; the chart creates a ClusterRole" >&2; exit 1; }
+kubectl auth can-i create namespaces >/dev/null 2>&1 ||
+  { echo "kubectl must reach the cluster as an admin; the chart creates a namespace and Roles" >&2; exit 1; }
 
 echo "==> Installing the ARIES chart as $namespace/$release"
 helm upgrade --install "$release" "$here/aries" \
@@ -75,8 +75,8 @@ if [ "$monitoring" = true ]; then
 fi
 
 if [ -n "$runner_kubeconfig" ]; then
-  # The chart's runner ServiceAccount holds only the namespaced Role and the
-  # node-metrics ClusterRole, so the runner need not hold cluster-admin.
+  # The chart's runner ServiceAccount holds only the namespaced Role, so the
+  # runner need not hold cluster-admin.
   secret="${account}-token"
   echo "==> Writing a kubeconfig for ServiceAccount $namespace/$account to $runner_kubeconfig"
   token=""
@@ -120,5 +120,10 @@ echo "  pod_cidr           : $(printf '%s' "$dump" | grep -m1 -o -- '--cluster-c
 echo "  service_cidr       : $(printf '%s' "$dump" | grep -m1 -o -- '--service-cluster-ip-range=[^" ,]*' | cut -d= -f2)"
 pools=$(kubectl get ippools.crd.projectcalico.org -o jsonpath='{.items[*].spec.cidr}' 2>/dev/null || true)
 [ -z "$pools" ] || echo "  calico pools       : $pools"
-echo "Set pod_cidr and service_cidr under sandbox.deployment.kubernetes, and build"
-echo "the bridge image on a base whose kubectl matches the version above."
+# The recorder reads pod measurements from Prometheus. A cluster node reaches
+# the Service's cluster address directly, with no port-forward.
+prometheus_ip=$(kubectl -n "$monitoring_namespace" get service "${monitoring_release}-kube-prometheus-prometheus" \
+  -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+[ -z "$prometheus_ip" ] || echo "  prometheus_url     : http://${prometheus_ip}:9090"
+echo "Set pod_cidr, service_cidr and prometheus_url under sandbox.deployment.kubernetes,"
+echo "and build the bridge image on a base whose kubectl matches the version above."

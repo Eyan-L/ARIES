@@ -91,14 +91,15 @@ k8s/apply-aries.sh --monitoring --runner-kubeconfig ~/aries-kubeconfig
 
 | Option | Effect |
 | --- | --- |
-| *(none)* | Installs the chart into namespace `aries`: the runner's and the bridge's service accounts and Roles, the `nodes/proxy` ClusterRole, the dashboard ConfigMap |
+| *(none)* | Installs the chart into namespace `aries`: the runner's and the bridge's service accounts and Roles, and the dashboard ConfigMap |
 | `--monitoring` | Upgrades the existing kube-prometheus-stack release in place with [`monitoring/values-aries.yaml`](monitoring/values-aries.yaml): cAdvisor scraped every second, and the Grafana sidecar reading dashboards from every namespace |
 | `--runner-kubeconfig PATH` | Writes a kubeconfig for the chart's `aries` ServiceAccount, so the runner holds the namespaced Role rather than cluster-admin |
 | `--values FILE` | Extra chart values, such as a `secret.yaml` for a private registry |
 | `--namespace NAME` | A namespace other than `aries`; set the same one in the profile |
 
-The script ends by printing the cluster's Kubernetes version and its pod and
-service CIDRs, which the next two steps need. It is safe to run again.
+The script ends by printing the cluster's Kubernetes version, its pod and
+service CIDRs, and the Prometheus address, which the next two steps need. It is
+safe to run again.
 
 The chart ships no workload. ARIES creates the harness, sandbox and bridge pods
 for each run and removes them afterwards.
@@ -140,6 +141,11 @@ three blocks must select the same backend and namespace:
 
 - **`pod_cidr`, `service_cidr`:** use the values the script printed. They keep a
   network-allowed sandbox off the cluster's own networks.
+- **`prometheus_url`:** add the printed address under
+  `sandbox.deployment.kubernetes` so the Recorder can read pod measurements.
+  `create-cluster.sh` writes it into the profiles it stages on the runner. It is
+  the Service's cluster address, so it only works from a cluster node, which
+  Invitro's loader node is.
 - **`images`:** map each locally built image to your registry. A key without a
   tag maps the repository and keeps the requested tag.
 - **`node_selector`:** add `"node_selector": {"loader-nodetype": "worker"}` to
@@ -191,10 +197,11 @@ kubectl -n aries get pods -l app.kubernetes.io/managed-by=aries -o wide
   SWE-bench Pro and Deep Research Bench are not.
 - **Task network isolation** depends on the CNI enforcing NetworkPolicy. Calico
   does; under flannel the policies are created and silently ignored.
-- **Pod resource metrics** are read from the kubelet Summary API and need the
-  `aries-node-metrics` ClusterRole. Set `rbac.nodeMetrics=false` to disable
-  them. The kubelet refreshes these figures every 10 seconds unless it runs with
-  `--housekeeping-interval`.
+- **Pod resource metrics** are read from Prometheus, so they need the
+  monitoring stack and a `prometheus_url` in the profile; without one they are
+  recorded as unsupported and the run continues. The kubelet refreshes these
+  figures every 10 seconds unless it runs with `--housekeeping-interval`, so
+  that is their resolution on a stock Invitro cluster.
 - **One bridge pod per run.** If it dies mid-run, the tasks in flight lose
   their tool access and their evidence, and evaluation is blocked for them.
 - **An interrupted runner can leave pods behind.** Remove them with

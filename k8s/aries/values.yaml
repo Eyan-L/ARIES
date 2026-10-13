@@ -6,7 +6,6 @@
 #   - the runner's ServiceAccount, its namespaced Role and a token for it
 #   - the tool bridge's ServiceAccount and Role (the runner creates one bridge
 #     pod per run; the chart ships no workload)
-#   - the nodes/proxy ClusterRole for pod telemetry
 #   - the Grafana dashboard ConfigMap
 #
 # Pick an environment file on top:
@@ -39,11 +38,6 @@ rbac:
   # The runner's namespaced Role: pod lifecycle, exec, port-forward, logs and
   # NetworkPolicies. The runner cannot work without it.
   create: true
-  # The one privilege the runner holds outside its namespace: `get` on
-  # nodes/proxy, so pod telemetry can read the kubelet Summary API through the
-  # API server. Read-only and confined to that subresource. Set false to drop
-  # it; the sandbox and harness still work and resources.jsonl is simply empty.
-  nodeMetrics: true
 
 serviceAccount:
   # The runner's identity, plus a long-lived token Secret that

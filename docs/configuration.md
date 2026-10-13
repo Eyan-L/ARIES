@@ -189,6 +189,7 @@ all select this backend and the same namespace; mixed compositions are rejected.
 | `namespace` | all | Namespace for every pod and policy. Defaults to `aries`; must match across the three blocks. |
 | `node_selector` | all | Labels a node must carry to host the pods, for example `{"loader-nodetype": "worker"}`. Unset leaves pods unpinned. |
 | `pod_cidr`, `service_cidr` | sandbox | Cluster networks a network-allowed sandbox is kept off. Unset leaves that egress open. |
+| `prometheus_url` | sandbox | Prometheus server that pod resource measurements are read from, reachable from where ARIES runs. Unset records measurements as unsupported. |
 | `service_account` | bridge | Account the bridge pod uses to exec into sandbox pods. Defaults to `aries-bridge`. |
 | `image_pull_secret` | all | Registry credential Secret in the namespace. |
 | `images` | all | Maps an image ARIES builds locally to the reference the cluster pulls. A key without a tag maps the repository and keeps the requested tag. |

@@ -2,9 +2,14 @@ package kubernetes
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -156,7 +161,45 @@ func TestValidateBridgeTarget(t *testing.T) {
 	}
 }
 
-func TestResourceSourceJoinsPodsWithKubeletSummary(t *testing.T) {
+// fakePrometheus serves instant queries from per-pod CPU seconds, memory bytes
+// and scrape timestamps.
+type fakePrometheus struct {
+	mu      sync.Mutex
+	cpu     map[string]float64
+	memory  map[string]float64
+	scraped map[string]float64
+	queries int
+	status  int
+}
+
+func (f *fakePrometheus) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.queries++
+	if f.status != 0 {
+		http.Error(w, "unavailable", f.status)
+		return
+	}
+	expression := r.URL.Query().Get("query")
+	if r.URL.Path != "/api/v1/query" || !strings.Contains(expression, `namespace="aries",container!=""`) {
+		http.Error(w, "unexpected query "+r.URL.String(), http.StatusBadRequest)
+		return
+	}
+	values := f.cpu
+	switch {
+	case strings.Contains(expression, "timestamp("):
+		values = f.scraped
+	case strings.Contains(expression, "container_memory_working_set_bytes"):
+		values = f.memory
+	}
+	var result []map[string]any
+	for pod, value := range values {
+		result = append(result, map[string]any{"metric": map[string]string{"pod": pod}, "value": []any{1.0, strconv.FormatFloat(value, 'f', -1, 64)}})
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{"resultType": "vector", "result": result}})
+}
+
+func TestResourceSourceReadsPodCountersFromPrometheus(t *testing.T) {
 	manager, _ := newTestManager(t, Options{})
 	sandbox := testRequest()
 	bridge := testRequest()
@@ -166,76 +209,98 @@ func TestResourceSourceJoinsPodsWithKubeletSummary(t *testing.T) {
 	other := testRequest()
 	other.Name = "aries-sandbox-other"
 	other.Labels["aries.run"] = "run-2"
-	onNode := func(m map[string]any) { m["spec"].(map[string]any)["nodeName"] = "node-a" }
-	list := `{"items":[` + podJSON(t, manager, sandbox, onNode) + `,` + podJSON(t, manager, bridge, onNode) + `,` + podJSON(t, manager, other, onNode) + `]}`
-	observed := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
-	summary := func() string {
-		stamp := observed.Format(time.RFC3339)
-		return `{"pods":[` +
-			`{"podRef":{"name":"aries-sandbox-abc123","namespace":"aries"},"cpu":{"time":"` + stamp + `","usageCoreNanoSeconds":500},"memory":{"workingSetBytes":4096}},` +
-			`{"podRef":{"name":"aries-bridge-1","namespace":"aries"},"cpu":{"time":"` + stamp + `","usageCoreNanoSeconds":70},"memory":{"workingSetBytes":10,"availableBytes":90}}]}`
-	}
-	fake := &fakeKubectl{respond: func(_ context.Context, args []string, _ []byte, stdout, _ io.Writer) error {
-		if args[1] == "--raw" {
-			_, _ = io.WriteString(stdout, summary())
-		} else {
-			_, _ = io.WriteString(stdout, list)
-		}
+	list := `{"items":[` + podJSON(t, manager, sandbox, nil) + `,` + podJSON(t, manager, bridge, nil) + `,` + podJSON(t, manager, other, nil) + `]}`
+	listings := 0
+	kubectl := &fakeKubectl{respond: func(_ context.Context, _ []string, _ []byte, stdout, _ io.Writer) error {
+		listings++
+		_, _ = io.WriteString(stdout, list)
 		return nil
 	}}
-	task, err := NewResourceSource(ResourceOptions{RunID: "run-1", TaskIDs: []string{"task-1"}})
+	prometheus := &fakePrometheus{
+		cpu:     map[string]float64{"aries-sandbox-abc123": 1.5, "aries-bridge-1": 0.07, "aries-sandbox-other": 9, "unrelated-pod": 3},
+		memory:  map[string]float64{"aries-sandbox-abc123": 4096, "aries-bridge-1": 10, "aries-sandbox-other": 1, "unrelated-pod": 1},
+		scraped: map[string]float64{"aries-sandbox-abc123": 1000.5, "aries-bridge-1": 1000.5, "aries-sandbox-other": 1000.5, "unrelated-pod": 1000.5},
+	}
+	server := httptest.NewServer(prometheus)
+	defer server.Close()
+
+	task, err := NewResourceSource(ResourceOptions{RunID: "run-1", TaskIDs: []string{"task-1"}, PrometheusURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
-	task.kubectl = fake
+	task.kubectl = kubectl
 	readings, err := task.Sample(context.Background())
 	if err != nil || len(readings) != 1 {
 		t.Fatalf("task readings = %+v, %v", readings, err)
 	}
-	if r := readings[0]; r.Scope != "task" || r.TaskID != "task-1" || r.Component != "sandbox" || r.RuntimeID != "aries-sandbox-abc123" || r.CPUUsageNanoseconds != 500 || r.MemoryLimitBytes != 512<<20 {
+	r := readings[0]
+	if r.Scope != "task" || r.RunID != "run-1" || r.TaskID != "task-1" || r.Component != "sandbox" || r.RuntimeID != "aries-sandbox-abc123" ||
+		r.CPUUsageNanoseconds != 1_500_000_000 || r.MemoryUsageBytes != 4096 || r.MemoryLimitBytes != 512<<20 || !r.ObservedAt.Equal(time.Unix(1000, 500_000_000)) {
 		t.Fatalf("task reading = %+v", r)
 	}
-	// The kubelet serves a cache: an unchanged observation is not a new sample.
+	// Prometheus serves the same scrape until the kubelet refreshes: that is
+	// not a new sample, and known pods are not listed again.
 	if repeated, err := task.Sample(context.Background()); err != nil || len(repeated) != 0 {
 		t.Fatalf("repeated readings = %+v, %v", repeated, err)
 	}
-	observed = observed.Add(10 * time.Second)
-	if advanced, err := task.Sample(context.Background()); err != nil || len(advanced) != 1 {
+	prometheus.mu.Lock()
+	prometheus.cpu["aries-sandbox-abc123"], prometheus.scraped["aries-sandbox-abc123"] = 2.5, 1010.5
+	prometheus.mu.Unlock()
+	advanced, err := task.Sample(context.Background())
+	if err != nil || len(advanced) != 1 || advanced[0].CPUUsageNanoseconds != 2_500_000_000 {
 		t.Fatalf("advanced readings = %+v, %v", advanced, err)
 	}
+	if listings != 1 {
+		t.Fatalf("pod listings = %d, want one: identities are cached", listings)
+	}
 
-	run, err := NewResourceSource(ResourceOptions{Scope: "run", RunID: "run-1"})
+	run, err := NewResourceSource(ResourceOptions{Scope: "run", RunID: "run-1", PrometheusURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run.kubectl = fake
+	run.kubectl = kubectl
 	readings, err = run.Sample(context.Background())
 	if err != nil || len(readings) != 1 {
 		t.Fatalf("run readings = %+v, %v", readings, err)
 	}
-	// Without a limit in the spec the ceiling is usage plus kubelet headroom.
-	if r := readings[0]; r.Scope != "run" || r.RunID != "run-1" || r.TaskID != "" || r.Component != "bridge" || r.MemoryLimitBytes != 100 {
+	// A pod without a memory limit reports none rather than a guess.
+	if r := readings[0]; r.Scope != "run" || r.TaskID != "" || r.Component != "bridge" || r.RuntimeID != "aries-bridge-1" || r.MemoryLimitBytes != 0 {
 		t.Fatalf("run reading = %+v", r)
-	}
-	if _, err := NewResourceSource(ResourceOptions{Scope: "run", RunID: "run-1", TaskIDs: []string{"task-1"}}); err == nil {
-		t.Fatal("run scope accepted task IDs")
 	}
 }
 
-func TestResourceSourceAbsorbsTransientDiscoveryFailures(t *testing.T) {
-	source, err := NewResourceSource(ResourceOptions{RunID: "run-1", TaskIDs: []string{"task-1"}})
+func TestResourceSourceReportsPrometheusAndDiscoveryFailures(t *testing.T) {
+	prometheus := &fakePrometheus{cpu: map[string]float64{"aries-sandbox-abc123": 1}, memory: map[string]float64{}, scraped: map[string]float64{}}
+	server := httptest.NewServer(prometheus)
+	defer server.Close()
+	source, err := NewResourceSource(ResourceOptions{RunID: "run-1", TaskIDs: []string{"task-1"}, PrometheusURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
 	source.kubectl = &fakeKubectl{respond: func(context.Context, []string, []byte, io.Writer, io.Writer) error {
 		return exitError(1)
 	}}
+	// A few failed pod listings are missing samples, not the end of telemetry.
 	for attempt := 1; attempt <= discoveryFailureBudget; attempt++ {
-		if readings, err := source.Sample(context.Background()); err != nil || readings != nil {
+		if readings, err := source.Sample(context.Background()); err != nil || len(readings) != 0 {
 			t.Fatalf("attempt %d = %+v, %v", attempt, readings, err)
 		}
 	}
 	if _, err := source.Sample(context.Background()); err == nil {
 		t.Fatal("persistent discovery failure never surfaced")
+	}
+	prometheus.mu.Lock()
+	prometheus.status = http.StatusServiceUnavailable
+	prometheus.mu.Unlock()
+	if _, err := source.Sample(context.Background()); err == nil || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("Prometheus failure = %v", err)
+	}
+	for _, address := range []string{"", "prometheus:9090", "ftp://prometheus", "http://user@prometheus:9090"} {
+		if _, err := NewResourceSource(ResourceOptions{RunID: "run-1", TaskIDs: []string{"task-1"}, PrometheusURL: address}); err == nil {
+			t.Errorf("address %q accepted", address)
+		}
+	}
+	if _, err := NewResourceSource(ResourceOptions{Scope: "run", RunID: "run-1", TaskIDs: []string{"task-1"}, PrometheusURL: server.URL}); err == nil {
+		t.Fatal("run scope accepted task IDs")
 	}
 }

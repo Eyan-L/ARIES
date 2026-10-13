@@ -32,6 +32,10 @@ type KubernetesDeploymentConfig struct {
 	// network-allowed sandbox is kept off. They apply to sandbox.deployment.
 	PodCIDR     string `json:"pod_cidr,omitempty"`
 	ServiceCIDR string `json:"service_cidr,omitempty"`
+	// PrometheusURL is the Prometheus server pod resource measurements are read
+	// from, reachable from where ARIES runs. It applies to sandbox.deployment;
+	// without it, measurements are reported as unsupported.
+	PrometheusURL string `json:"prometheus_url,omitempty"`
 	// ServiceAccount lets the bridge pod exec into sandbox pods. It applies to
 	// bridge.deployment and defaults to "aries-bridge", which the chart creates.
 	ServiceAccount string `json:"service_account,omitempty"`
@@ -113,6 +117,9 @@ func (c *Config) normalizeKubernetes() error {
 		if placement.cfg != &c.Sandbox.Deployment && (k.PodCIDR != "" || k.ServiceCIDR != "") {
 			return fmt.Errorf("%s.kubernetes: pod_cidr and service_cidr apply only to sandbox.deployment", placement.path)
 		}
+		if placement.cfg != &c.Sandbox.Deployment && k.PrometheusURL != "" {
+			return fmt.Errorf("%s.kubernetes: prometheus_url applies only to sandbox.deployment", placement.path)
+		}
 		if placement.cfg != &c.Bridge.Deployment && k.ServiceAccount != "" {
 			return fmt.Errorf("%s.kubernetes: service_account applies only to bridge.deployment", placement.path)
 		}
@@ -147,6 +154,12 @@ func (d *DeploymentConfig) normalize(path string) error {
 			}
 			if _, err := netip.ParsePrefix(cidr); err != nil {
 				return fmt.Errorf("%s.kubernetes: %q is not a CIDR", path, cidr)
+			}
+		}
+		if address := d.Kubernetes.PrometheusURL; address != "" {
+			u, err := url.Parse(address)
+			if err != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+				return fmt.Errorf("%s.kubernetes.prometheus_url must be an http or https URL", path)
 			}
 		}
 		for local, remote := range d.Kubernetes.Images {

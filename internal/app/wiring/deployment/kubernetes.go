@@ -1,9 +1,11 @@
 package deployment
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/hyscale-lab/aries/pkg/config"
+	"github.com/hyscale-lab/aries/pkg/core"
 	kubernetesdeployment "github.com/hyscale-lab/aries/pkg/deployment/kubernetes"
 	"github.com/hyscale-lab/aries/pkg/monitor"
 	"github.com/sirupsen/logrus"
@@ -40,14 +42,34 @@ func NewKubernetesSandbox(cfg config.DeploymentConfig, runID, occurrenceID strin
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct sandbox deployment: %w", err)
 	}
-	source, err := kubernetesdeployment.NewResourceSource(kubernetesdeployment.ResourceOptions{Namespace: cfg.Kubernetes.Namespace, RunID: runID, TaskIDs: []string{occurrenceID}})
+	source, err := newKubernetesResources(cfg, kubernetesdeployment.ResourceOptions{RunID: runID, TaskIDs: []string{occurrenceID}})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct Kubernetes resource source: %w", err)
 	}
 	return transport, source, nil
 }
 
-// NewKubernetesRunResources observes the run's shared bridge pod.
-func NewKubernetesRunResources(cfg config.DeploymentConfig, runID string) (monitor.ResourceSource, error) {
-	return kubernetesdeployment.NewResourceSource(kubernetesdeployment.ResourceOptions{Scope: "run", Namespace: cfg.Kubernetes.Namespace, RunID: runID})
+// NewKubernetesRunResources observes the run's shared bridge pod. It takes the
+// sandbox placement, which names the Prometheus server for the whole run.
+func NewKubernetesRunResources(sandbox config.DeploymentConfig, runID string) (monitor.ResourceSource, error) {
+	return newKubernetesResources(sandbox, kubernetesdeployment.ResourceOptions{Scope: "run", RunID: runID})
 }
+
+// newKubernetesResources reads pod measurements from the configured Prometheus
+// server. Without one the capability is absent, which is recorded as
+// unsupported and lets the run continue.
+func newKubernetesResources(sandbox config.DeploymentConfig, options kubernetesdeployment.ResourceOptions) (monitor.ResourceSource, error) {
+	if sandbox.Kubernetes.PrometheusURL == "" {
+		return unsupportedResources{}, nil
+	}
+	options.Namespace = sandbox.Kubernetes.Namespace
+	options.PrometheusURL = sandbox.Kubernetes.PrometheusURL
+	return kubernetesdeployment.NewResourceSource(options)
+}
+
+type unsupportedResources struct{}
+
+func (unsupportedResources) Sample(context.Context) ([]core.ResourceReading, error) {
+	return nil, fmt.Errorf("%w: sandbox.deployment.kubernetes.prometheus_url is not set", monitor.ErrUnsupported)
+}
+func (unsupportedResources) Close() error { return nil }
