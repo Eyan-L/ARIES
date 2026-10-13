@@ -31,18 +31,35 @@ contract, at the cost of one process per operation.
 
 ## Create, stage, start
 
-The contract stages private files between `Create` and `Start`, but a pod cannot
-exist without running. Each container therefore starts behind a gate:
+`Create`, `UploadArchive` and `Start` are operations of the
+[`Runtime` interface](../../pkg/deployment/deployment.go) in the deployment
+contract, not Kubernetes states. Components call them in that order to stage
+private files before their process runs: the shared harness runtime in
+[`Runtime.Start`](../../pkg/harness/harness.go) and the bridge service in
+[`Service.Start`](../../pkg/bridge/service.go). Docker maps them directly onto
+create container, copy files, start container.
+
+Kubernetes has no created-but-not-started pod, so the provider adds a gate. The
+gate is a shell wrapper that the provider sets as the container's command, in
+front of the command the component requested. It is the `gateShell` constant in
+[`kubernetes.go`](../../pkg/deployment/kubernetes/kubernetes.go), applied by
+`gatedCommand` in [`manifest.go`](../../pkg/deployment/kubernetes/manifest.go):
 
 ```sh
 while [ ! -e /run/aries-gate/start ]; do sleep 0.2; done; exec "$@"
 ```
 
-`Create` applies the pod and waits until it runs, parked at the gate.
-`UploadArchive` extracts into the live container. `Start` writes the marker and
-the gate execs the requested command, so it becomes PID 1 with its exact argv.
-The gate directory is an `emptyDir` owned by ARIES, outside the image's
-filesystem; exec bookkeeping lives there too.
+| Contract operation | What the provider does | Pod state |
+| --- | --- | --- |
+| `Create` | Applies the pod and waits until it is `Running` | Container runs the gate loop |
+| `UploadArchive` | Extracts the archive with `kubectl exec` | Unchanged |
+| `Start` | Writes the marker file `/run/aries-gate/start` | Gate execs the requested command |
+
+The pod is `Running` from `Create` onwards. "Started" is therefore a logical
+state of the runtime: it means the marker file exists and the gate has replaced
+itself with the requested command, which becomes PID 1 with its exact argv.
+`/run/aries-gate` is an `emptyDir` volume that ARIES mounts into every pod,
+outside the image's filesystem; exec bookkeeping lives there too.
 
 Three consequences are explicit provider constraints:
 
