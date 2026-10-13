@@ -731,56 +731,14 @@ func TestRecorderDropsBaselineBeyondGracePeriod(t *testing.T) {
 	}
 }
 
-// pacedSource stands in for a cache-backed source: it cannot produce new data
-// faster than its declared floor.
-type pacedSource struct {
-	fakeSource
-	floor time.Duration
-}
-
-func (source *pacedSource) MinimumSampleInterval() time.Duration { return source.floor }
-
-// A source that declares a floor raises a faster configured interval to it.
-// Sampling below the floor returns duplicate observations the source discards,
-// while still paying the full per-sample cost — which for the Kubernetes source
-// is a kubectl process spawn per sample per concurrent occurrence.
-func TestPacedSourceRaisesConfiguredInterval(t *testing.T) {
-	source := &pacedSource{floor: 5 * time.Second}
-	recorder := newTestRecorder(t, source, filepath.Join(t.TempDir(), "run"), time.Second)
-	if recorder.interval != 5*time.Second {
-		t.Errorf("interval = %v, want 5s; a faster interval only produces duplicates", recorder.interval)
-	}
-}
-
-// The floor raises, never lowers. A caller that deliberately samples slowly is
-// not sped up to the source's minimum.
-func TestPacedSourceDoesNotLowerASlowerInterval(t *testing.T) {
-	source := &pacedSource{floor: 5 * time.Second}
-	recorder := newTestRecorder(t, source, filepath.Join(t.TempDir(), "run"), 30*time.Second)
-	if recorder.interval != 30*time.Second {
-		t.Errorf("interval = %v, want the configured 30s", recorder.interval)
-	}
-}
-
-// The default stays exactly as it was for sources that do not opt in, so the
-// Docker path is unaffected.
-func TestUnpacedSourceKeepsItsInterval(t *testing.T) {
-	recorder := newTestRecorder(t, &fakeSource{}, filepath.Join(t.TempDir(), "run"), time.Second)
-	if recorder.interval != time.Second {
-		t.Errorf("interval = %v, want the configured 1s", recorder.interval)
-	}
-}
-
 // The `second` field must report elapsed time, not the number of samples taken.
-// These coincided while the interval was fixed at one second, so a tick counter
-// passed unnoticed until PacedSource let a source raise the interval — at which
-// point sample 10 of a 5s run was still labelled "second": 10 while standing 50
-// seconds in. The artifact stayed well-formed and nothing errored, which is why
-// this is asserted rather than left to inspection.
+// The two coincide only at a one-second interval: sample 10 of a five-second
+// run stands 50 seconds in. The artifact stays well-formed either way, which is
+// why this is asserted rather than left to inspection.
 func TestSampleSecondIsElapsedTimeNotTickCount(t *testing.T) {
 	t0 := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
-	source := &pacedSource{floor: 5 * time.Second}
-	recorder := newTestRecorder(t, source, filepath.Join(t.TempDir(), "run"), time.Second)
+	source := &fakeSource{}
+	recorder := newTestRecorder(t, source, filepath.Join(t.TempDir(), "run"), 5*time.Second)
 	pinClock(recorder, t0)
 	source.sample = func(_ context.Context, call int) ([]core.ResourceReading, error) {
 		observed := t0.Add(time.Duration(call-1) * 5 * time.Second)
@@ -789,7 +747,7 @@ func TestSampleSecondIsElapsedTimeNotTickCount(t *testing.T) {
 	if err := recorder.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// Three ticks of the effective 5s interval: 5s, 10s, 15s into the run.
+	// Three ticks of the 5s interval: 5s, 10s, 15s into the run.
 	for tick := 1; tick <= 3; tick++ {
 		if err := recorder.sample(context.Background(), t0.Add(time.Duration(tick)*5*time.Second)); err != nil {
 			t.Fatal(err)

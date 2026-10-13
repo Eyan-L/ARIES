@@ -105,8 +105,8 @@ type cpuBaseline struct {
 // Docker source is in that position: ContainerStats computes fresh values per
 // call, so a live container is always reported.
 //
-// The Kubernetes source is not. The kubelet serves stats from a cache refreshed
-// every 10-20s, so a reading is only emitted when the observation time actually
+// The Kubernetes source is not. The kubelet refreshes container counters on its
+// housekeeping interval, so a reading is emitted only when the observation time
 // advances and the runtime is legitimately absent in between. Discarding its
 // baseline on the first absence makes every sample look like that runtime's
 // first, reporting cpu_percent 0 forever while the raw counter climbs.
@@ -118,22 +118,6 @@ type cpuBaseline struct {
 // "CPU counter decreased" check already rejects.
 type BaselineTolerantSource interface {
 	BaselineGracePeriod() int
-}
-
-// PacedSource is an optional interface a ResourceSource may implement to
-// declare the fastest interval at which it can produce new data.
-//
-// The default — a source that does not implement this — is sampled at whatever
-// interval the caller configured. The Docker source is in that position:
-// ContainerStats computes fresh values per call, so a faster interval genuinely
-// buys resolution.
-//
-// A source backed by a cache does not have that property. Sampling it faster
-// returns the same observation repeatedly while still paying the full per-sample
-// cost, which under concurrency is enough to push the source past its own
-// request timeout and end the run's telemetry.
-type PacedSource interface {
-	MinimumSampleInterval() time.Duration
 }
 
 // New validates configuration without contacting Docker or creating artifacts.
@@ -185,16 +169,6 @@ func New(options Options) (*Recorder, error) {
 	}
 	if options.Interval <= 0 {
 		return nil, errors.New("monitor sample interval must be positive")
-	}
-	// A source that cannot produce new data faster than some cadence raises the
-	// interval to it. Sampling below that floor yields duplicate observations
-	// the source discards anyway, while still paying the per-sample cost. The
-	// effective value is recorded as interval_milliseconds in the index, so the
-	// artifact shows what was used rather than what was asked for.
-	if paced, ok := options.Source.(PacedSource); ok {
-		if floor := paced.MinimumSampleInterval(); floor > options.Interval {
-			options.Interval = floor
-		}
 	}
 	if options.RequestTimeout == 0 {
 		options.RequestTimeout = defaultRequestTimeout
@@ -360,16 +334,9 @@ func (recorder *Recorder) sampleLoop(ctx context.Context, done chan struct{}) {
 }
 
 // elapsedSeconds is how far into the run a sample was taken, measured from the
-// clock rather than counted in ticks.
-//
-// Counting ticks was correct only while the interval was fixed at one second.
-// Once a source could raise it (see PacedSource) the counter and the field name
-// diverged silently: at a 5s interval, tick 25 was labelled "second": 25 while
-// standing 125 seconds into the run. Nothing errored and the artifact stayed
-// well-formed, which is the kind of defect that survives into a results table.
-//
-// Deriving from the clock also keeps artifacts comparable across intervals, and
-// leaves the one-second case producing exactly the values it always did.
+// clock rather than counted in ticks. A tick count equals elapsed seconds only
+// at a one-second interval, and a source may emit readings less often than it
+// is sampled, so the clock is what keeps artifacts comparable.
 func (recorder *Recorder) elapsedSeconds(sampleTime time.Time) uint64 {
 	recorder.mu.Lock()
 	startTime := recorder.startTime
