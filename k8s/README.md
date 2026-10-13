@@ -210,7 +210,4 @@ kubectl -n aries get pods -l app.kubernetes.io/managed-by=aries -o wide
 - **One bridge pod per run.** If it dies mid-run, the tasks in flight lose
   their tool access and their evidence, and evaluation is blocked for them.
 - **An interrupted runner can leave pods behind.** Remove them with
-  `kubectl -n aries delete pods,networkpolicies -l app.kubernetes.io/managed-by=aries`.
-- The chart's ClusterRole and ClusterRoleBinding are cluster-scoped and named
-  from `fullnameOverride`. Two releases in different namespaces need distinct
-  values.
+  `kubectl -n aries delete pods,services,networkpolicies -l app.kubernetes.io/managed-by=aries`.
