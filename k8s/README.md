@@ -8,6 +8,7 @@ its components on a cluster, and what that provider does not support, see
 
 ```
 k8s/
+  create-cluster.sh     # runs Invitro's setup, then apply-aries.sh, in one go
   apply-aries.sh        # applies everything below to an existing cluster
   aries/                # the ARIES chart: runner and bridge RBAC, dashboard
   monitoring/           # values overlay for an existing kube-prometheus-stack
@@ -24,6 +25,35 @@ k8s/
 
 Invitro also installs Knative, Istio and MetalLB. ARIES does not use them; its
 pods live in their own namespace.
+
+## 1 and 2 in one command
+
+From your own machine, with passwordless SSH to every node:
+
+```sh
+k8s/create-cluster.sh --prometheus user@master user@runner user@worker1 user@worker2
+```
+
+As in Invitro, the first node is the control plane and the second is the loader
+node; the rest are workers. The script:
+
+1. checks out Invitro at the revision pinned at the top of the script into
+   `.cache/invitro` and runs its `create_multinode_cluster` against the nodes;
+2. copies the committed `k8s/` tree to the master and runs `apply-aries.sh`
+   there;
+3. builds `bin/aries` and `bin/aries-ssh-client` for the loader node and stages
+   them with `profiles/`, `configs/` and a namespaced kubeconfig under `~/aries`.
+
+| Option | Effect |
+| --- | --- |
+| `--prometheus` | Sets Invitro's `DEPLOY_PROMETHEUS` and applies the ARIES monitoring overlay |
+| `--node-setup FILE` | Uses your own Invitro `node_setup.json`; needed when the nodes' internal addresses are not Invitro's default `10.0.1.x` layout |
+| `--skip-cluster` | The cluster exists already; only apply ARIES and restage the runner |
+| `--no-runner` | Do not build or stage the runner |
+
+ARIES holds no copy of Invitro's scripts: only the pinned revision, which
+`INVITRO_REVISION` overrides. The two steps below are what the script runs, for
+doing them by hand.
 
 ## 1. Build the cluster
 

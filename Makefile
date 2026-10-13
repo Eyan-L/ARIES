@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint integration run setup charts-lint charts-template
+.PHONY: build test test-race lint integration run setup k8s-cluster charts-lint charts-template
 
 PROFILE ?= profiles/openclaw-tb2-fix-git-deepseek.json
 
@@ -55,6 +55,12 @@ proto:
 .PHONY: bridge-image
 bridge-image: build
 	go run ./scripts/build-bridge-image
+
+# Build a cluster with Invitro's setup and apply ARIES to it. NODES lists SSH
+# targets: the master, the runner (Invitro's loader node), then the workers.
+#   make k8s-cluster NODES="user@master user@runner user@worker1"
+k8s-cluster:
+	./k8s/create-cluster.sh $(K8S_FLAGS) $(NODES)
 
 # Render the chart without a cluster. Catches template errors and, with
 # --dry-run, schema problems that only show up once values are merged.
