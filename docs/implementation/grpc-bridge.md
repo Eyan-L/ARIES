@@ -69,9 +69,13 @@ API and read as missing ([Docker files](../../pkg/deployment/docker/files.go)).
   `FAILED_PRECONDITION`. Both refusals are recorded with status `rejected` and
   exit code -1.
 - The server keeps at most 16 MiB of stdout and 16 MiB of stderr for each
-  `Exec`. It drops the remainder and sets `truncated`. The command continues,
-  and the record keeps the true byte counts. This bound protects the shared
-  bridge process, because a unary reply is held in memory.
+  `Exec`. Above that, it drops the remainder and sets `truncated`, and the
+  record keeps the true byte counts. This bound protects the shared bridge
+  process, because a unary reply is held in memory. With the Docker backend,
+  this bound does not fire: the backend fails an exec whose stdout or stderr
+  passes 16 MiB
+  ([`maxExecOutput`](../../pkg/deployment/docker/exec.go)), the same as for
+  SSH. The call then ends with `REASON_SANDBOX_ERROR` and exit code 255.
 - Each gRPC message is at most 64 MiB, on the server and on the client. The
   output bound always fires first.
 - File content has no size bound. It moves in 64 KiB chunks. The server holds
@@ -150,8 +154,9 @@ see [bridge evidence](../run-results.md#bridge-evidence). The
 - `ReadFile` and `ReadLines` record the path and the bytes sent as
   `stdout_bytes`, never the content.
 - `sha256` is the hex digest of the content that a completed file call moved.
-- `truncated` is set when `Exec` output was cut, when a `ReadFile` range ends
-  before the end of the file, or when `ReadLines` has more lines.
+- `truncated` is set when `Exec` output was cut (never with the Docker backend,
+  see above), when a `ReadFile` range ends before the end of the file, or when
+  `ReadLines` has more lines.
 - gRPC records have no `request_type` or `want_reply`. Those fields are SSH only.
 
 `grpc_raw.log` is opt-in through `bridge.retain_raw_log` and has mode 0600. Each

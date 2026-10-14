@@ -46,6 +46,9 @@ const (
 	// 5.6 KB — and a high bound costs nothing until it fires. Erring high is
 	// deliberate: truncation is not free either, because the agent stops seeing
 	// the output it asked for, which can change a task's outcome.
+	//
+	// With the Docker backend this bound does not fire: Docker fails an exec
+	// whose stdout or stderr passes its own 16 MiB maxExecOutput first.
 	defaultOutputLimit = 16 << 20
 
 	// maxMessageBytes is a backstop and must never be the binding constraint.
