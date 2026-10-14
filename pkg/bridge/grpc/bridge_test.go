@@ -27,7 +27,7 @@ func TestExecRunsBashInTheSandboxWorkdir(t *testing.T) {
 	executor.exitCode, executor.stdout, executor.stderr = 7, []byte("out"), []byte("err")
 	manager, client, endpoint := startBridge(t, executor, Options{})
 
-	if endpoint.Protocol != "grpc" || endpoint.Workdir != testWorkdir || endpoint.Username != "" {
+	if endpoint.Protocol != "grpc" || endpoint.Workdir != testWorkdir || endpoint.Username != "aries" {
 		t.Fatalf("endpoint = %#v", endpoint)
 	}
 	for _, login := range []bool{false, true} {

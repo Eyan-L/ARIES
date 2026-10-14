@@ -31,6 +31,9 @@ import (
 const (
 	defaultBridgeCleanup = 20 * time.Second
 
+	// lockedUsername is the endpoint user the run service requires, as on SSH.
+	lockedUsername = "aries"
+
 	// defaultOutputLimit truncates each of stdout and stderr. Unary Exec holds a
 	// whole reply in this process — the handler's buffer plus the marshalled
 	// copy — where the SSH bridge streamed to the channel and accumulated
@@ -213,7 +216,7 @@ func (manager *Manager) StartTarget(ctx context.Context, sandbox target.Executor
 	manager.stopErr = nil
 	address := listener.Addr().String()
 	manager.logger.WithContext(ctx).WithFields(logrus.Fields{"address": address, "container": sandbox.ContainerName()}).Info("gRPC bridge started")
-	return core.ToolEndpoint{Protocol: "grpc", Address: address, Workdir: sandbox.Workdir(), LogPaths: session.logPaths()}, nil
+	return core.ToolEndpoint{Protocol: "grpc", Address: address, Username: lockedUsername, Workdir: sandbox.Workdir(), LogPaths: session.logPaths()}, nil
 }
 
 // logPaths omits grpc_raw.log when it was not retained, so the endpoint never
