@@ -11,9 +11,11 @@ Follow [Runner interfaces](../pkg/runner/interfaces.go) and [lifecycle](architec
 
 - Keep implementations independent; a paired bridge may consume a narrow sandbox
   capability. Pair Hermes/OpenClaw with their corresponding SSH bridges.
-  Keep harness-generated per-user state (such as `HOME`) out of the task workdir
-  so it never becomes part of the evaluated candidate.
-- Preserve exact argv/workdir and native protocol semantics. Never retry ambiguous
+  Configure harness-generated per-user state (such as default `HOME`) outside
+  the task workdir; preserve explicit native per-call overrides.
+- Preserve shell bodies and native protocol semantics; adapt provider-owned path
+  arguments or filesystem mappings without rewriting agent command text. Resolve an unspecified
+  sandbox workdir from the running image before exposing access. Never retry ambiguous
   submissions, widen accepted payloads to hide failures, or enable Hermes credential sync.
 - Pass resolved tool/service endpoints to consumers and opaque placement handles
   to deployment. Deployment owns attachment, publication, and address resolution;
