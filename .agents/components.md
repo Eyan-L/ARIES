@@ -42,7 +42,9 @@ Follow [Runner interfaces](../pkg/runner/interfaces.go) and [lifecycle](architec
   Command cancellation must preserve the sandbox needed for evaluation.
 - Preserve benchmark-specific isolation: pinned inputs, sanitized candidate state,
   private test/reference material, and all required verifier checks. Do not change
-  score meaning when refactoring evaluation.
+  score meaning when refactoring evaluation. Keep DRB's [harness task adaptation](../docs/benchmarks/deep-research-bench.md#harness-task-prompt)
+  separate from its unchanged dataset question supplied to the judge; record prompt
+  changes as experimental method changes.
 - Replicate the benchmark's upstream evaluation as closely as possible rather
   than inventing equivalents. SWE-bench Pro captures the agent's patch, then runs
   the upstream entry script in a fresh sandbox from the task image.
