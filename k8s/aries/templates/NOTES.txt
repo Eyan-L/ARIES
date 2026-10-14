@@ -13,4 +13,4 @@ The runner is a host process, not a pod. Build ARIES where kubectl reaches this
 cluster, then run a Kubernetes profile:
 
   make build
-  ./bin/aries profiles/hermes-tb2-fix-git-deepseek-k8s-pods.json
+  ./bin/aries profiles/kubernetes/hermes-tb2-fix-git-deepseek-k8s-pods.json

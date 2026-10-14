@@ -26,6 +26,32 @@ Operators and configuration are trusted; agent-generated commands remain
 untrusted. Credential confidentiality, verifier isolation, resource ownership,
 and confirmed cleanup remain necessary for valid experiments.
 
+## Implementation simplicity
+
+Use the supported native harness, backend, or benchmark implementation as the
+behavioral baseline. Before adding a wrapper, state, retries, or supervision,
+inspect the affected native path and identify the concrete ARIES requirement it
+cannot meet for an actual consumer. Implement that gap directly. Prefer deletion
+and direct API calls; hypothetical reuse or future versions do not justify extra
+abstractions or compatibility paths.
+
+Reuse standard or existing libraries for protocol and serialization mechanics.
+Add a dependency when those options lack the required capability; maintaining a
+generic protocol implementation merely to avoid a dependency adds its own cost.
+Existing wrappers, comments, and tests are not proof that their policy is needed.
+Tests should establish observable contract behavior. When an authorized contract
+change removes a guarantee, remove the wrappers, state, error checks, and tests
+that existed solely to enforce it, while retaining checks for remaining guarantees.
+
+For example, borrowed command cancellation closes native execution transport;
+it does not promise to kill the command. Bridge revocation closes access, joins
+handlers, and finalizes evidence. Cleanup of an owned runtime must still confirm
+its removal. PID tracking or additional termination machinery needs a separate
+requirement; it does not follow from transport cancellation. Credential
+confidentiality, verifier isolation, measurement meaning, and resource ownership
+remain requirements when mechanisms are simplified. See the
+[bridge lifecycle contract](design/bridge.md#lifecycle-cancellation-and-failure).
+
 ## System overview
 
 ```mermaid

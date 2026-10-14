@@ -52,7 +52,7 @@ Search URLs use unique sandbox runtime names. Provider-specific address inspecti
 stays in Docker, as described in [endpoint handoff](../design/deployment.md#endpoint-handoff).
 
 [Streaming execution](../../pkg/deployment/docker/exec.go) sends argv, workdir,
-environment and user directly to Moby exec, demultiplexes its output, and reads
+environment and user directly to Moby exec, separates stdout and stderr, and reads
 the exit status from exec inspection. Cancellation closes the attached connection;
 the command may continue running until it exits or the sandbox is removed. No
 shell supervisor or PID bookkeeping is added. The sandbox applies agent defaults;

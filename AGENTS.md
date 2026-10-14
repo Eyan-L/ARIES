@@ -22,6 +22,7 @@ examples. Report code gaps without silently weakening principles.
 Before editing `AGENTS.md` or `.agents/*.md`, consult
 [OpenAI’s guidance on skills and prompts](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra).
 This applies to instruction pages, not `.agents/scratch/` plans and reviews.
+Always use subagent so the consultation would not contaminate main agent's context.
 Keep agent pages to rules, ownership, and task-specific pointers. Update existing
 rules instead of appending implementation summaries, field inventories, or run
 reports. Put explanations in `docs/` and temporary plans/reviews in `.agents/scratch/`;

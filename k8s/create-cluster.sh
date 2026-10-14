@@ -259,5 +259,5 @@ echo "  1. Publish the bridge image for the Kubernetes version printed above (k8
 echo "  2. Set pod_cidr and service_cidr in the profile to the values printed above."
 if [ "$stage_runner" = true ]; then
   echo "  3. scp DEEPSEEK_API.key $runner:$runner_dir/ && ssh $runner chmod 600 $runner_dir/DEEPSEEK_API.key"
-  echo "  4. ssh $runner 'cd ~/$runner_dir && KUBECONFIG=\$PWD/kubeconfig ./bin/aries profiles/openclaw-tb2-fix-git-deepseek-k8s-pods.json'"
+  echo "  4. ssh $runner 'cd ~/$runner_dir && KUBECONFIG=\$PWD/kubeconfig ./bin/aries profiles/kubernetes/openclaw-tb2-fix-git-deepseek-k8s-pods.json'"
 fi

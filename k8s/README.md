@@ -164,7 +164,7 @@ cluster, add the model key, and run a profile:
 ```sh
 make build
 export KUBECONFIG=~/aries-kubeconfig
-./bin/aries profiles/hermes-tb2-fix-git-deepseek-k8s-pods.json
+./bin/aries profiles/kubernetes/hermes-tb2-fix-git-deepseek-k8s-pods.json
 ```
 
 `execution.concurrency` bounds how many task occurrences run at once. Each one

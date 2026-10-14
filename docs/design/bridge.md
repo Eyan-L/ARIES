@@ -72,6 +72,9 @@ Harness completion is authoritative for completed tool calls. Revocation closes
 bridge-owned access and handlers; it does not snapshot, classify, or sweep sandbox
 processes. Command cancellation closes the backend execution transport and may
 leave the command running, as with native Docker or Kubernetes exec.
+Tool-call errors remain in command evidence and do not by themselves fail
+revocation, including errors returned during cancellation. Handler-join timeouts
+and evidence-finalization failures still prevent confirmed release.
 The live sandbox, including benchmark services and background work, remains
 available to evaluation. There are no leases, heartbeats, renewal RPCs, or
 controller-liveness watchdogs; abrupt Runner crashes may need operator cleanup.

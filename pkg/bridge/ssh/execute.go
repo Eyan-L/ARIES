@@ -100,20 +100,9 @@ func (session *bridgeSession) execute(ctx context.Context, channel gossh.Channel
 	} else {
 		result, err = session.sandbox.ExecStream(ctx, prepared.Command, stdin, stdout, stderr)
 	}
-	if contextErr := ctx.Err(); contextErr != nil && !hasCancellationCause(err) {
-		// A sandbox error returned after revocation is ambiguous unless it carries
-		// the cancellation cause. Preserve both so Stop fails closed rather than
-		// silently treating an unconfirmed tool termination as an earlier error.
-		if err == nil {
-			err = contextErr
-		} else {
-			err = errors.Join(contextErr, err)
-		}
-	}
 	exitCode := result.ExitCode
 	status, message := "completed", ""
 	if err != nil {
-		session.recordRevocationError(err)
 		exitCode = 255
 		status, message = "failed", "sandbox execution failed"
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

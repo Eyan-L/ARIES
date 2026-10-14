@@ -103,7 +103,7 @@ func TestSupportedBridgePlacements(t *testing.T) {
 // The Kubernetes provider is selected by the same switches as Docker, and only
 // as a whole: a component left on another backend could not be reached.
 func TestKubernetesBackendSelectsItsProviderForEveryComponent(t *testing.T) {
-	source, err := os.ReadFile("../../profiles/openclaw-tb2-fix-git-deepseek-k8s-pods.json")
+	source, err := os.ReadFile("../../profiles/kubernetes/openclaw-tb2-fix-git-deepseek-k8s-pods.json")
 	if err != nil {
 		t.Fatal(err)
 	}

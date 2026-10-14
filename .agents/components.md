@@ -1,52 +1,38 @@
 # Component contracts
 
-Follow [Runner interfaces](../pkg/runner/interfaces.go) and [lifecycle](architecture.md).
+Follow [Runner interfaces](../pkg/runner/interfaces.go), [design principles](design.md),
+and [lifecycle](architecture.md#task-lifecycle).
 
 | Role | Required boundary |
 | --- | --- |
-| Benchmark | Own tasks, sanitization, private verifier, and independent evaluation that follows the original methodology. |
+| Benchmark | Own tasks, sanitization, private verifiers, and independent upstream evaluation. |
 | AgentHarness | Own the agent runtime, model interaction, and private evidence; retain distinct telemetry entries. |
-| ToolSandbox | Keep the task environment alive through evaluation; start fresh evaluation sandboxes on request. |
+| ToolSandbox | Keep the task environment live through evaluation; create fresh Runner-owned evaluation sandboxes from it on request. |
 | ToolBridge | Grant temporary access to one exact sandbox; confirm revocation. |
 
-- Keep implementations independent; a paired bridge may consume a narrow sandbox
-  capability. Pair Hermes/OpenClaw with their corresponding SSH bridges.
-  Keep harness-generated per-user state (such as `HOME`) out of the task workdir
-  so it never becomes part of the evaluated candidate.
-- Preserve exact argv/workdir and native protocol semantics. Never retry ambiguous
+- Keep implementations independent; paired bridges may borrow narrow sandbox
+  capabilities. Pair Hermes/OpenClaw with their respective SSH dialects. Keep
+  harness-generated per-user state, including `HOME`, outside the task workdir.
+- Preserve exact argv/workdir and native semantics. Never retry ambiguous
   submissions, widen accepted payloads to hide failures, or enable Hermes credential sync.
-- Pass resolved tool/service endpoints to consumers and opaque placement handles
-  to deployment. Deployment owns attachment, publication, and address resolution;
-  a component must not require a private network per harness/sandbox pair.
-  Fresh task/evaluation handles borrow run connectivity; releasing one must not
-  remove the network or close peers' transports.
-- Reuse shared harness ownership and credential mechanics. Retain ownership on
-  failed removal; Run snapshots survive Stop, which prevents new admission.
-  Keep native defaults and credential fallback policies intact; redacted errors
-  must not expose secrets through their cause chain.
-- Share one bridge service per run; give each sandbox its own listener, immutable
-  execution binding and recorder, addressed by one stable sandbox ID.
-  Native tool execution must not call back into Runner or own sandbox lifecycle.
-  Use plaintext unauthenticated gRPC and unauthenticated SSH in the trusted
-  research environment, with one in-memory service host key and no client-key
-  staging. Preserve exact-target and ownership validation.
-  Runner explicitly releases sessions; retain operation deadlines and bounded
-  evidence collection without leases or controller-liveness supervision.
-  Close session-owned access/handlers and collect finalized evidence; remove the
-  shared runtime at run cleanup. Harness completion is authoritative for completed
-  tool calls;
-  leave sandbox processes intact for evaluation. Keep replay inputs private;
-  use Moby for Docker.
-  Command cancellation closes execution transport, preserving native backend
-  semantics; it does not guarantee command termination. Keep the sandbox alive
-  for evaluation and confirm runtime removal at task cleanup.
-- Preserve benchmark-specific isolation: pinned inputs, sanitized candidate state,
-  private test/reference material, and all required verifier checks. Do not change
-  score meaning when refactoring evaluation.
-- Replicate the benchmark's upstream evaluation as closely as possible rather
-  than inventing equivalents. SWE-bench Pro captures the agent's patch, then runs
-  the upstream entry script in a fresh sandbox from the task image.
+- Task/evaluation handles borrow run connectivity. Releasing one must not remove
+  the network or close peers' transports. Do not require a private network per pair.
+- Reuse shared harness ownership and credential mechanics. Preserve native defaults
+  and credential fallbacks. Retain ownership after failed removal. `Stop` prevents admission while preserving
+  `Run` snapshots. Redacted errors must not expose secrets through their causes.
+- Each sandbox session has its own listener, immutable target binding, and recorder,
+  keyed by a stable sandbox ID. Native tool execution must not call Runner or own
+  sandbox lifecycle. Use plaintext unauthenticated gRPC and unauthenticated SSH,
+  one in-memory service host key, and no client-key staging; preserve
+  target/ownership checks.
+- Retain tool-operation deadlines and bounded evidence collection. Revocation
+  closes access, joins handlers, and finalizes evidence; keep replay inputs private.
+  Tool errors alone must not fail revocation. Harness completion is authoritative
+  for completed calls; leave sandbox processes intact for evaluation. Apply the [cancellation/cleanup distinction](design.md).
+- Preserve benchmark pins, candidate sanitization, verifier privacy, required checks,
+  and score meaning. Follow upstream evaluation, including fresh-sandbox methods
+  where required; see [benchmark contracts](../docs/design/benchmark.md).
 
-Details: [benchmark](../docs/design/benchmark.md), [harness](../docs/design/harness.md),
-[bridge](../docs/design/bridge.md), [sandbox](../docs/design/sandbox.md),
-[deployment](../docs/design/deployment.md), [implementations](../docs/implementation/README.md).
+Details: [harness](../docs/design/harness.md), [bridge](../docs/design/bridge.md),
+[sandbox](../docs/design/sandbox.md), [deployment](../docs/design/deployment.md),
+[implementations](../docs/implementation/README.md).

@@ -763,116 +763,90 @@ func TestStopIgnoresPriorOrdinaryToolExecutionFailure(t *testing.T) {
 	assertLogString(t, records[0], "status", "failed")
 }
 
-type terminationFailSandbox struct {
+type revokedExecSandbox struct {
 	cancelingSandbox
-	terminationErr error
+	result core.CommandResult
+	err    error
 }
 
-func (sandbox *terminationFailSandbox) ExecStream(ctx context.Context, _ core.Command, _ io.Reader, _, _ io.Writer) (core.CommandResult, error) {
+func (sandbox *revokedExecSandbox) ExecStream(ctx context.Context, _ core.Command, _ io.Reader, _, _ io.Writer) (core.CommandResult, error) {
 	sandbox.once.Do(func() { close(sandbox.started) })
 	<-ctx.Done()
 	close(sandbox.canceled)
-	return core.CommandResult{ExitCode: -1}, errors.Join(ctx.Err(), sandbox.terminationErr)
+	return sandbox.result, sandbox.err
 }
 
-func TestStopFailsWhenCancellationCannotConfirmTargetedTermination(t *testing.T) {
-	outputDir := t.TempDir()
-	manager := newContractManager(t, outputDir)
-	terminationErr := errors.New("targeted termination was not confirmed")
-	sandbox := &terminationFailSandbox{
-		cancelingSandbox: cancelingSandbox{started: make(chan struct{}), canceled: make(chan struct{})},
-		terminationErr:   terminationErr,
-	}
-	endpoint, err := manager.StartTarget(context.Background(), sandbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client, err := ssh.Dial("tcp", endpoint.Address, bridgeClientConfig(t, endpoint))
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := client.NewSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-	const stdinSecret = "revocation-stdin-secret"
-	const envSecret = "revocation-env-secret"
-	session.Stdin = strings.NewReader(stdinSecret)
-	sandbox.enableToolCalls()
-	remote := encodeCanonicalTokens([]string{remoteEnv, "ARIES_SECRET=" + envSecret, remoteShell, "-c", "cat", "openclaw-sandbox-fs"})
-	if err := session.Start(remote); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-sandbox.started:
-	case <-time.After(time.Second):
-		t.Fatal("sandbox exec did not start")
-	}
-	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	stopErr := manager.Stop(stopCtx)
-	_ = client.Close()
-	if !errors.Is(stopErr, context.Canceled) || !errors.Is(stopErr, terminationErr) {
-		t.Fatalf("Stop() error = %v, want cancellation joined with termination failure", stopErr)
-	}
-	records, content := readToolCallRecords(t, outputDir)
-	if len(records) != 1 {
-		t.Fatalf("tool log records = %d, want one: %s", len(records), content)
-	}
-	assertLogString(t, records[0], "status", "canceled")
-	for _, secret := range []string{stdinSecret, envSecret} {
-		if bytes.Contains(content, []byte(secret)) {
-			t.Fatalf("tool log contains secret %q: %s", secret, content)
-		}
-	}
-}
-
-type cancellationBlindSandbox struct {
-	cancelingSandbox
-	err error
-}
-
-func (sandbox *cancellationBlindSandbox) ExecStream(ctx context.Context, _ core.Command, _ io.Reader, _, _ io.Writer) (core.CommandResult, error) {
-	sandbox.once.Do(func() { close(sandbox.started) })
-	<-ctx.Done()
-	close(sandbox.canceled)
-	return core.CommandResult{ExitCode: -1}, sandbox.err
-}
-
-func TestStopFailsClosedWhenCanceledSandboxOmitsCancellationCause(t *testing.T) {
-	manager := newContractManager(t, t.TempDir())
-	transportErr := errors.New("attach ended without termination confirmation")
-	sandbox := &cancellationBlindSandbox{
-		cancelingSandbox: cancelingSandbox{started: make(chan struct{}), canceled: make(chan struct{})},
-		err:              transportErr,
-	}
-	endpoint, err := manager.StartTarget(context.Background(), sandbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client, err := ssh.Dial("tcp", endpoint.Address, bridgeClientConfig(t, endpoint))
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := client.NewSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sandbox.enableToolCalls()
-	if err := session.Start(encodeCanonicalTokens([]string{remoteShell, "-c", "sleep forever"})); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-sandbox.started:
-	case <-time.After(time.Second):
-		t.Fatal("sandbox exec did not start")
-	}
-	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	stopErr := manager.Stop(stopCtx)
-	_ = client.Close()
-	if !errors.Is(stopErr, context.Canceled) || !errors.Is(stopErr, transportErr) {
-		t.Fatalf("Stop() error = %v, want cancellation joined with ambiguous sandbox error", stopErr)
+func TestStopPreservesToolResultAfterCancellation(t *testing.T) {
+	transportErr := errors.New("exec transport closed")
+	for _, test := range []struct {
+		name     string
+		err      error
+		status   string
+		exitCode int
+	}{
+		{name: "canceled", err: context.Canceled, status: "canceled", exitCode: 255},
+		{name: "canceled with transport error", err: errors.Join(context.Canceled, transportErr), status: "canceled", exitCode: 255},
+		{name: "transport error", err: transportErr, status: "failed", exitCode: 255},
+		{name: "completed", status: "completed", exitCode: 7},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			manager := newContractManager(t, outputDir)
+			sandbox := &revokedExecSandbox{
+				cancelingSandbox: cancelingSandbox{started: make(chan struct{}), canceled: make(chan struct{})},
+				result:           core.CommandResult{ExitCode: 7},
+				err:              test.err,
+			}
+			endpoint, err := manager.StartTarget(context.Background(), sandbox)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client, err := ssh.Dial("tcp", endpoint.Address, bridgeClientConfig(t, endpoint))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			session, err := client.NewSession()
+			if err != nil {
+				t.Fatal(err)
+			}
+			const stdinSecret = "revocation-stdin-secret"
+			const envSecret = "revocation-env-secret"
+			session.Stdin = strings.NewReader(stdinSecret)
+			sandbox.enableToolCalls()
+			remote := encodeCanonicalTokens([]string{remoteEnv, "ARIES_SECRET=" + envSecret, remoteShell, "-c", "cat", "openclaw-sandbox-fs"})
+			if err := session.Start(remote); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-sandbox.started:
+			case <-time.After(time.Second):
+				t.Fatal("sandbox exec did not start")
+			}
+			stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := manager.Stop(stopCtx); err != nil {
+				t.Fatalf("Stop() failed after joining the canceled execution: %v", err)
+			}
+			connection, err := net.DialTimeout("tcp", endpoint.Address, time.Second)
+			if err == nil {
+				_ = connection.Close()
+				t.Fatal("revoked bridge still accepts connections")
+			}
+			records, content := readToolCallRecords(t, outputDir)
+			if len(records) != 1 {
+				t.Fatalf("tool log records = %d, want one: %s", len(records), content)
+			}
+			assertLogString(t, records[0], "status", test.status)
+			if got := records[0]["exit_code"]; got != float64(test.exitCode) {
+				t.Fatalf("recorded exit code = %v, want %d", got, test.exitCode)
+			}
+			for _, secret := range []string{stdinSecret, envSecret} {
+				if bytes.Contains(content, []byte(secret)) {
+					t.Fatalf("tool log contains secret %q: %s", secret, content)
+				}
+			}
+		})
 	}
 }
 

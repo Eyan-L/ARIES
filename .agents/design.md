@@ -1,35 +1,28 @@
-# Binding design principles
+# Design principles
 
-Obey these principles. Identify conflicts and obtain agreement before changing
-an invariant; routine aligned work needs no additional approval.
+Obtain agreement before changing an invariant; proceed with aligned work.
 
-- ARIES is a research platform for trusted researchers in controlled environments.
-  Prioritize experimental correctness, reproducibility, and simple implementations.
-  Add multi-tenant authorization, public-service hardening, or consumer-product
-  safeguards only when explicitly required. Trust operators and configuration,
-  but treat agent-generated commands as untrusted. Preserve credential
-  confidentiality, verifier isolation, resource ownership, and confirmed cleanup.
-- ARIES runs, evaluates, and measures agent workloads. Preserve measurement
-  meaning; distinguish unsupported measurements from measured zero.
-  Confirmed runtime teardown must not fail observation of remaining runtimes;
-  preserve genuine measurement failures.
-- Runner composes exactly four replaceable roles: Benchmark, AgentHarness,
-  ToolSandbox, and ToolBridge. Preserve their behavior, ownership, and isolation
-  [contracts](components.md). Model runtime infrastructure adds no role.
-- Separate component behavior from execution mechanisms through explicit
-  deployment dependencies. Deployment owns runtime operations; TaskEnvironment
-  borrows task attachment from run-owned connectivity. Logical components need
-  not be services.
-- Bridges adapt native protocols while preserving operation semantics,
-  cancellation, errors, and ownership.
-- Keep selection in `cmd/aries`, construction/rollback in `internal/app/wiring`,
-  and behavior in `pkg`. Avoid registries and generic orchestration frameworks.
-- Withhold verifier material until harness termination and bridge revocation
-  are confirmed. Evaluate independently of harness success, in the live task
-  sandbox or in fresh Runner-owned sandboxes from the task environment, following
-  the benchmark's original methodology; record the two outcomes separately.
-- Cleanup reverses ownership, covers partial failure and cancellation, and
-  confirms resource absence. Closing a transport is insufficient. Never weaken
-  ownership, credential, isolation, or cleanup checks to fit an implementation.
+- ARIES serves trusted researchers in controlled environments. Favor experimental
+  correctness, reproducibility, and simplicity. Add public-service, multi-tenant,
+  or consumer-product safeguards only when requested. Trust operators/configuration,
+  not agent commands; preserve credential confidentiality, verifier isolation,
+  and ownership.
+- Preserve measurement meaning: unsupported is not zero. Confirmed teardown must
+  not fail observation of remaining runtimes; retain genuine measurement failures.
+- Runner has four replaceable roles: Benchmark, AgentHarness, ToolSandbox, and
+  ToolBridge. Model infrastructure adds no role. Follow [ownership](architecture.md)
+  and [component contracts](components.md); logical components need not be services.
+- Use supported native behavior. Extra wrappers, state, retries, or supervision
+  need an inspected native path and a concrete unmet requirement for an actual
+  consumer. Preserve operation semantics, cancellation, errors, and ownership.
+- Prefer deletion and direct calls over speculative abstractions. Avoid registries
+  and generic orchestration frameworks. When an authorized contract change removes
+  a guarantee, delete the wrappers, state, checks, and tests enforcing only it.
+- Withhold verifiers until harness stop and bridge revocation are confirmed.
+  Evaluate independently of harness success using the benchmark's original
+  methodology; record harness and evaluation outcomes separately.
+- Cleanup reverses ownership, including partial starts and cancellation, and
+  confirms owned-runtime absence. Borrowed-command cancellation closes transport
+  without guaranteeing command termination.
 
 Rationale and current gaps: [human design guide](../docs/design.md).

@@ -1,7 +1,9 @@
 # Validation
 
-- Choose checks for the changed behavior; reuse coverage and avoid tests of trivial
-  forwarding. The full suite is for release validation, not every edit.
+- Choose checks for the changed behavior; reuse coverage and avoid trivial
+  forwarding tests. Assert observable contract behavior, not incidental wrappers
+  or structure. Existing tests alone do not justify an extra policy. The full
+  suite is for release validation, not every edit.
 - Release checks: `make build`, `make test`, `make test-race`, `make lint`,
   `make integration`. Unit/race tests require neither Docker nor paid APIs;
   integration uses real containers and a deterministic fake model endpoint.

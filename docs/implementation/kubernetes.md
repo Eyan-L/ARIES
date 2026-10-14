@@ -105,7 +105,7 @@ outside the image's filesystem.
 Three consequences are explicit provider constraints:
 
 - **Images need `/bin/sh`.** Sandbox images also need `tar` and `stat` for file
-  transfer. Per-command user switching requires util-linux `setpriv`.
+  transfer. Per-command user switching requires `setpriv` from `util-linux`.
 - **An unset entrypoint is not preserved.** The cluster API does not report an
   image's entrypoint, so a request without one runs its arguments directly.
   OpenClaw relies on this and its launcher does not need the image entrypoint.
@@ -136,7 +136,7 @@ for removing remaining processes.
 own user. SWE-bench Pro runs the agent's commands as UID 65532 and ARIES's own
 as root, so a command that requests another user starts as root and uses
 `setpriv --reuid UID --regid GID --clear-groups` before running it. Such images
-must provide util-linux `setpriv`, and the sandbox container must start as root.
+must provide `setpriv` from `util-linux`, and the sandbox container must start as root.
 `HOME` is set to `/` for such a command, as Docker does for a UID with no account.
 
 Archives move as tar streams over exec. Pod logs are a single interleaved

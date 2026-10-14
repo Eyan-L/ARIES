@@ -82,14 +82,12 @@ type bridgeSession struct {
 	partialStart  bool
 	replyRequest  func(*gossh.Request, bool) error
 
-	mu            sync.Mutex
-	connections   map[net.Conn]struct{}
-	revoked       bool
-	done          chan struct{}
-	revocationMu  sync.Mutex
-	revocationErr error
-	wait          sync.WaitGroup
-	revokeOnce    sync.Once
+	mu          sync.Mutex
+	connections map[net.Conn]struct{}
+	revoked     bool
+	done        chan struct{}
+	wait        sync.WaitGroup
+	revokeOnce  sync.Once
 }
 
 func New(options Options) (*Manager, error) {
@@ -271,57 +269,10 @@ func (session *bridgeSession) finalize(ctx context.Context) error {
 	}
 	// Closing admission and joining execution happens before releasing the signer.
 	session.configuration = nil
-	cleanupErr := errors.Join(
-		session.revocationError(), auditErr,
-	)
-	if session.partialStart && cleanupErr == nil {
-		cleanupErr = os.RemoveAll(session.artifactDir)
+	if session.partialStart && auditErr == nil {
+		return os.RemoveAll(session.artifactDir)
 	}
-	return cleanupErr
-}
-
-func (session *bridgeSession) recordRevocationError(err error) {
-	if !hasCancellationCause(err) {
-		return
-	}
-	session.revocationMu.Lock()
-	session.revocationErr = errors.Join(session.revocationErr, err)
-	session.revocationMu.Unlock()
-}
-
-func (session *bridgeSession) revocationError() error {
-	session.revocationMu.Lock()
-	defer session.revocationMu.Unlock()
-	if isPureCancellation(session.revocationErr) {
-		return nil
-	}
-	return session.revocationErr
-}
-
-func hasCancellationCause(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
-
-func isPureCancellation(err error) bool {
-	if err == nil {
-		return false
-	}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		children := joined.Unwrap()
-		if len(children) == 0 {
-			return false
-		}
-		for _, child := range children {
-			if !isPureCancellation(child) {
-				return false
-			}
-		}
-		return true
-	}
-	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
-		return isPureCancellation(wrapped.Unwrap())
-	}
-	return err == context.Canceled || err == context.DeadlineExceeded
+	return auditErr
 }
 
 func (session *bridgeSession) revoke() {

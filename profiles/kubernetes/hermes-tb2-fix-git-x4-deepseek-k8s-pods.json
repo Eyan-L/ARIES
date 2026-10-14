@@ -1,6 +1,6 @@
 {
   "name": "hermes-tb2-fix-git-x4-deepseek-k8s-pods",
-  "versions_file": "../configs/versions.json",
+  "versions_file": "../../configs/versions.json",
   "overrides_file": "",
   "execution": {
     "concurrency": 4
