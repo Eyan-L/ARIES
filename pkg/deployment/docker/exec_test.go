@@ -31,7 +31,6 @@ type fakeDocker struct {
 	execs            map[string]client.ExecCreateOptions
 	exitCodes        map[string]int
 	execRunning      map[string]bool
-	execPresent      map[string]bool
 	removed          bool
 	copyToErr        error
 	containerLogsErr error
@@ -52,12 +51,7 @@ type fakeDocker struct {
 	closeCalls       int
 	closeErr         error
 
-	// Docker answers an exec's attach before it starts the process: the first
-	// unstartedInspects inspects report an exec it has not started yet, as
-	// running (marked, with no process yet) when unstartedRunning is set.
-	unstartedInspects int
-	unstartedRunning  bool
-	execDelay         time.Duration
+	execDelay time.Duration
 }
 
 func (fake *fakeDocker) Close() error {
@@ -70,7 +64,7 @@ func (fake *fakeDocker) Close() error {
 func newFakeDocker() *fakeDocker {
 	return &fakeDocker{
 		execs: make(map[string]client.ExecCreateOptions), exitCodes: make(map[string]int),
-		execRunning: make(map[string]bool), execPresent: make(map[string]bool),
+		execRunning: make(map[string]bool),
 	}
 }
 
@@ -139,18 +133,6 @@ func (fake *fakeDocker) ContainerInspect(_ context.Context, id string, _ client.
 	return client.ContainerInspectResult{Container: fake.container}, nil
 }
 
-func (fake *fakeDocker) ContainerTop(context.Context, string, client.ContainerTopOptions) (client.ContainerTopResult, error) {
-	fake.mu.Lock()
-	defer fake.mu.Unlock()
-	processes := make([][]string, 0)
-	for _, present := range fake.execPresent {
-		if present {
-			processes = append(processes, []string{"123"})
-		}
-	}
-	return client.ContainerTopResult{Titles: []string{"PID"}, Processes: processes}, nil
-}
-
 func (fake *fakeDocker) ExecCreate(_ context.Context, id string, options client.ExecCreateOptions) (client.ExecCreateResult, error) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
@@ -161,7 +143,6 @@ func (fake *fakeDocker) ExecCreate(_ context.Context, id string, options client.
 	execID := fmt.Sprintf("exec-%d", fake.nextExec)
 	fake.execs[execID] = options
 	fake.execRunning[execID] = true
-	fake.execPresent[execID] = true
 	return client.ExecCreateResult{ID: execID}, nil
 }
 
@@ -178,19 +159,14 @@ func (fake *fakeDocker) ExecAttach(_ context.Context, execID string, _ client.Ex
 		defer engineSide.Close()
 		time.Sleep(fake.execDelay)
 		exitCode := 0
-		if len(options.Cmd) > 6 && options.Cmd[6] == "/launcher" {
+		if len(options.Cmd) > 0 && options.Cmd[0] == "/launcher" {
 			if !fake.stderrOnly {
 				_ = writeMux(engineSide, stdcopy.Stdout, []byte(`{"status":"ok","result":{"payloads":[{"text":"task complete"}]}}`))
 			}
 			_ = writeMux(engineSide, stdcopy.Stderr, []byte("agent diagnostic\n"))
 		}
-		if len(options.Cmd) > 4 {
-			trailer := fmt.Sprintf("\x1eARIES_EXEC_EXIT_%s=%d\x1f", options.Cmd[5], exitCode)
-			_ = writeMux(engineSide, stdcopy.Stderr, []byte(trailer))
-		}
 		fake.mu.Lock()
 		fake.exitCodes[execID] = exitCode
-		fake.execPresent[execID] = false
 		if !fake.keepAttachOpen {
 			fake.execRunning[execID] = false
 		}
@@ -209,15 +185,7 @@ func (fake *fakeDocker) ExecInspect(_ context.Context, execID string, _ client.E
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 	status := fake.exitCodes[execID]
-	if fake.unstartedInspects > 0 {
-		fake.unstartedInspects--
-		return client.ExecInspectResult{ID: execID, ContainerID: fake.container.ID, Running: fake.unstartedRunning}, nil
-	}
-	pid := 0
-	if _, started := fake.execs[execID]; started {
-		pid = 123
-	}
-	return client.ExecInspectResult{ID: execID, ContainerID: fake.container.ID, Running: fake.execRunning[execID], PID: pid, ExitCode: status}, nil
+	return client.ExecInspectResult{ID: execID, ContainerID: fake.container.ID, Running: fake.execRunning[execID], ExitCode: status}, nil
 }
 
 func (fake *fakeDocker) ContainerLogs(context.Context, string, client.ContainerLogsOptions) (client.ContainerLogsResult, error) {
@@ -298,14 +266,12 @@ func writeMux(writer io.Writer, stream stdcopy.StdType, content []byte) error {
 	return err
 }
 
-func TestExecAttachedWaitsForAnExecDockerHasNotStarted(t *testing.T) {
-	// Taking the first "not running, no PID" inspect for an exit closed the
-	// stream after the drain, before the command wrote its trailer.
+func TestExecWaitsForOutputBeforeInspecting(t *testing.T) {
+	// A slow command must finish streaming before its exit status is read.
 	fake := newFakeDocker()
 	fake.container.ID = "container"
 	fake.container.State = &container.State{Running: true}
-	fake.unstartedInspects = 3
-	fake.execDelay = 800 * time.Millisecond
+	fake.execDelay = 40 * time.Millisecond
 	manager := &Manager{client: fake}
 	result, err := manager.Exec(context.Background(), "container", core.Command{Path: "true", Dir: "/"})
 	if err != nil || result.ExitCode != 0 || result.Stdout != "" {
@@ -313,16 +279,16 @@ func TestExecAttachedWaitsForAnExecDockerHasNotStarted(t *testing.T) {
 	}
 }
 
-func TestExecCompletesWhenDockerKeepsAttachOpen(t *testing.T) {
+func TestExecOpenAttachmentHonorsDeadline(t *testing.T) {
 	fake := newFakeDocker()
 	fake.container.ID = "container"
 	fake.container.State = &container.State{Running: true}
 	fake.keepAttachOpen = true
 	manager := &Manager{client: fake}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	result, err := manager.Exec(ctx, "container", core.Command{Path: "/launcher"})
-	if err != nil || result.ExitCode != 0 || result.Stderr != "agent diagnostic\n" || !strings.Contains(result.Stdout, "task complete") {
+	if !errors.Is(err, context.DeadlineExceeded) || result.ExitCode != -1 || result.Stderr != "agent diagnostic\n" || !strings.Contains(result.Stdout, "task complete") {
 		t.Fatalf("result=%+v, err=%v", result, err)
 	}
 }

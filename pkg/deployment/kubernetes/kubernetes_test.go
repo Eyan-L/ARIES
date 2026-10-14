@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -347,64 +350,82 @@ func TestAddressForwardsOutsideTheCluster(t *testing.T) {
 	}
 }
 
-func TestExecStreamPreservesArgvAndReadsTheExitTrailer(t *testing.T) {
+func TestExecStreamPreservesArgvAndKubectlResult(t *testing.T) {
 	manager, fake := newTestManager(t, Options{})
-	fake.respond = func(_ context.Context, args []string, stdin []byte, stdout, stderr io.Writer) error {
-		token := args[slices.Index(args, "aries-exec")+2]
+	fake.respond = func(_ context.Context, _ []string, stdin []byte, stdout, stderr io.Writer) error {
 		_, _ = stdout.Write(append([]byte("out:"), stdin...))
-		_, _ = io.WriteString(stderr, "warning\n\x1eARIES_EXEC_EXIT_"+token+"=3\x1f")
-		// kubectl reports the remote status after the stream ends.
-		_, _ = io.WriteString(stderr, "command terminated with exit code 3\n")
+		_, _ = io.WriteString(stderr, "warning\ncommand terminated with exit code 3\n")
 		return exitError(3)
 	}
-	command := core.Command{Path: "printf", Args: []string{"a b", "", "$HOME; rm"}, Dir: "/work dir", Env: map[string]string{"B": "2", "A": "1 x"}, Stdin: []byte("in")}
+	command := core.Command{Path: "printf", Args: []string{"a b", "", "$HOME; rm"}, Stdin: []byte("in")}
 	result, err := manager.Exec(context.Background(), "aries-sandbox-abc123", command)
-	if err != nil || result.ExitCode != 3 || result.Stdout != "out:in" || result.Stderr != "warning\n" {
+	if err != nil || result.ExitCode != 3 || result.Stdout != "out:in" || result.Stderr != "warning\ncommand terminated with exit code 3\n" {
 		t.Fatalf("Exec = %+v, %v", result, err)
 	}
-	args := fake.calls[0]
-	separator := slices.Index(args, "--")
-	if !slices.Equal(args[:separator], []string{"exec", "-n", "aries", "aries-sandbox-abc123", "-c", containerName, "-i"}) {
-		t.Fatalf("kubectl args = %v", args[:separator])
-	}
-	remote := args[separator+1:]
-	if !slices.Equal(remote[:4], []string{"/bin/sh", "-c", execShell, "aries-exec"}) || !strings.HasPrefix(remote[4], execStatePrefix) || remote[6] != "/work dir" || remote[7] != "" {
-		t.Fatalf("wrapper = %v", remote)
-	}
-	if !slices.Equal(remote[8:], []string{"env", "A=1 x", "B=2", "printf", "a b", "", "$HOME; rm"}) {
-		t.Fatalf("argv = %q", remote[8:])
+	want := []string{"exec", "-n", "aries", "aries-sandbox-abc123", "-c", containerName, "-i", "--", "printf", "a b", "", "$HOME; rm"}
+	if !slices.Equal(fake.calls[0], want) {
+		t.Fatalf("kubectl args = %q, want %q", fake.calls[0], want)
 	}
 
-	fake.respond = func(_ context.Context, _ []string, _ []byte, _, stderr io.Writer) error {
-		_, _ = io.WriteString(stderr, "error: unable to upgrade connection")
-		return exitError(1)
+	failure := errors.New("unable to start kubectl")
+	fake.respond = func(_ context.Context, _ []string, _ []byte, _, _ io.Writer) error {
+		return failure
 	}
-	if result, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "true"}); err == nil || result.ExitCode != -1 || !strings.Contains(err.Error(), "unable to upgrade") {
+	if result, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "true"}); !errors.Is(err, failure) || result.ExitCode != -1 {
 		t.Fatalf("transport failure = %+v, %v", result, err)
 	}
-	// A requested user is passed to the wrapper, which drops to it in the pod.
-	fake.calls = nil
-	fake.respond = func(_ context.Context, args []string, _ []byte, _, stderr io.Writer) error {
-		_, _ = io.WriteString(stderr, "\x1eARIES_EXEC_EXIT_"+args[slices.Index(args, "aries-exec")+2]+"=0\x1f")
-		return nil
+}
+
+func TestExecWorkdirAndEnvironmentPreserveArguments(t *testing.T) {
+	manager, fake := newTestManager(t, Options{})
+	// Run the remote argv locally to verify shell quoting and I/O behavior.
+	fake.respond = func(ctx context.Context, args []string, stdin []byte, stdout, stderr io.Writer) error {
+		remote := args[slices.Index(args, "--")+1:]
+		command := exec.CommandContext(ctx, remote[0], remote[1:]...)
+		command.Stdin = bytes.NewReader(stdin)
+		command.Stdout, command.Stderr = stdout, stderr
+		return command.Run()
 	}
-	if _, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "id", User: "65532:65532"}); err != nil {
+	dir := filepath.Join(t.TempDir(), "work dir; $HOME")
+	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if user := fake.calls[0][slices.Index(fake.calls[0], "aries-exec")+4]; user != "65532:65532" {
-		t.Fatalf("wrapper user = %q", user)
+	command := core.Command{
+		Path: "/bin/sh", Args: []string{"-c", `printf '%s\n' "$PWD" "$CHECK" "$@"; cat; printf 'warning\n' >&2; exit 3`, "probe", "a b", "", "$HOME; rm"},
+		Dir: dir, Env: map[string]string{"CHECK": "value; $HOME"}, Stdin: []byte("input\n"),
+	}
+	result, err := manager.Exec(context.Background(), "aries-sandbox-abc123", command)
+	want := dir + "\nvalue; $HOME\na b\n\n$HOME; rm\ninput\n"
+	if err != nil || result.ExitCode != 3 || result.Stdout != want || result.Stderr != "warning\n" {
+		t.Fatalf("Exec = %+v, %v; want stdout %q", result, err, want)
+	}
+}
+
+func TestExecUserUsesSetpriv(t *testing.T) {
+	manager, fake := newTestManager(t, Options{})
+	if _, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "id", User: "65532:65532", Env: map[string]string{"HOME": "/home/agent"}}); err != nil {
+		t.Fatal(err)
+	}
+	remote := fake.calls[0][slices.Index(fake.calls[0], "--")+1:]
+	want := []string{"env", "HOME=/", "setpriv", "--reuid=65532", "--regid=65532", "--clear-groups", "--", "env", "HOME=/home/agent", "id"}
+	if !slices.Equal(remote, want) {
+		t.Fatalf("argv = %q, want %q", remote, want)
+	}
+	if _, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "true", User: "0:0"}); err != nil {
+		t.Fatal(err)
+	}
+	remote = fake.calls[1][slices.Index(fake.calls[1], "--")+1:]
+	if !slices.Equal(remote, []string{"true"}) {
+		t.Fatalf("root argv = %q", remote)
 	}
 	if _, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "true", User: "agent"}); err == nil {
 		t.Fatal("named exec user accepted")
 	}
 }
 
-func TestExecStreamTerminatesTheProcessGroupOnTimeout(t *testing.T) {
+func TestExecStreamCancelsOnlyTheClientOnTimeout(t *testing.T) {
 	manager, fake := newTestManager(t, Options{})
-	fake.respond = func(ctx context.Context, args []string, _ []byte, _, _ io.Writer) error {
-		if slices.Contains(args, "aries-cancel") {
-			return nil
-		}
+	fake.respond = func(ctx context.Context, _ []string, _ []byte, _, _ io.Writer) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -412,42 +433,34 @@ func TestExecStreamTerminatesTheProcessGroupOnTimeout(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) || result.ExitCode != -1 {
 		t.Fatalf("Exec = %+v, %v", result, err)
 	}
-	if len(fake.calls) != 2 {
-		t.Fatalf("calls = %v", fake.calls)
-	}
-	exec, cancel := fake.calls[0], fake.calls[1]
-	state := exec[slices.Index(exec, "aries-exec")+1]
-	if !slices.Equal(cancel[len(cancel)-5:], []string{"/bin/sh", "-c", cancelExecShell, "aries-cancel", state}) {
-		t.Fatalf("cancel = %v", cancel)
-	}
-	// A wrapper that left no state has nothing to terminate.
-	fake.respond = func(ctx context.Context, args []string, _ []byte, _, _ io.Writer) error {
-		if slices.Contains(args, "aries-cancel") {
-			return exitError(cancelNoState)
-		}
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	if _, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "sleep", Timeout: 20 * time.Millisecond}); !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "confirm") {
-		t.Fatalf("Exec = %v", err)
+	if len(fake.calls) != 1 {
+		t.Fatalf("timeout made additional kubectl calls: %v", fake.calls)
 	}
 }
 
 func TestExecStreamBoundsOutput(t *testing.T) {
-	manager, fake := newTestManager(t, Options{})
-	fake.respond = func(ctx context.Context, args []string, _ []byte, stdout, _ io.Writer) error {
-		if slices.Contains(args, "aries-cancel") {
-			return nil
-		}
-		if _, err := stdout.Write(bytes.Repeat([]byte("x"), 32)); err == nil {
-			return errors.New("limit not enforced")
-		}
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	_, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "yes", OutputLimitBytes: 16})
-	if err == nil || !strings.Contains(err.Error(), "output exceeds 16 bytes") {
-		t.Fatalf("Exec = %v", err)
+	for _, stream := range []string{"stdout", "stderr"} {
+		t.Run(stream, func(t *testing.T) {
+			manager, fake := newTestManager(t, Options{})
+			fake.respond = func(ctx context.Context, _ []string, _ []byte, stdout, stderr io.Writer) error {
+				output := stdout
+				if stream == "stderr" {
+					output = stderr
+				}
+				if _, err := output.Write(bytes.Repeat([]byte("x"), 32)); err == nil {
+					return errors.New("limit not enforced")
+				}
+				<-ctx.Done()
+				return ctx.Err()
+			}
+			_, err := manager.Exec(context.Background(), "aries-sandbox-abc123", core.Command{Path: "yes", OutputLimitBytes: 16})
+			if err == nil || !strings.Contains(err.Error(), "output exceeds 16 bytes") {
+				t.Fatalf("Exec = %v", err)
+			}
+			if len(fake.calls) != 1 {
+				t.Fatalf("output limit made additional kubectl calls: %v", fake.calls)
+			}
+		})
 	}
 }
 
@@ -460,13 +473,9 @@ func TestArchiveTransfer(t *testing.T) {
 	if !slices.Equal(upload[len(upload)-6:], []string{"tar", "-x", "-f", "-", "-C", "/app"}) || string(fake.inputs[0]) != "tar-bytes" {
 		t.Fatalf("upload = %v", upload)
 	}
-	trailer := func(args []string, stderr io.Writer, status int) {
-		_, _ = io.WriteString(stderr, "\x1eARIES_EXEC_EXIT_"+args[slices.Index(args, "aries-exec")+2]+"="+string(rune('0'+status))+"\x1f")
-	}
 	fake.respond = func(_ context.Context, args []string, _ []byte, stdout, stderr io.Writer) error {
 		if slices.Contains(args, "stat") {
 			_, _ = io.WriteString(stdout, "9 81a4\n")
-			trailer(args, stderr, 0)
 			return nil
 		}
 		_, _ = io.WriteString(stdout, "tar-bytes")
@@ -486,7 +495,6 @@ func TestArchiveTransfer(t *testing.T) {
 	}
 	fake.respond = func(_ context.Context, args []string, _ []byte, _, stderr io.Writer) error {
 		_, _ = io.WriteString(stderr, "stat: cannot statx '/app/missing': No such file or directory\n")
-		trailer(args, stderr, 1)
 		return exitError(1)
 	}
 	if _, _, err := manager.DownloadArchive(context.Background(), "aries-sandbox-abc123", "/app/missing"); !errors.Is(err, runner.ErrNotFound) {

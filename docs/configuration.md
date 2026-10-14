@@ -197,7 +197,9 @@ all select this backend and the same namespace; mixed compositions are rejected.
 The cluster pulls images, so `aries setup` builds nothing for this backend: the
 bridge image and the derived Hermes image must already be published. Each
 sandbox gets its own NetworkPolicy and the effective run policy is
-`per-sandbox-policy`. Checked-in examples are
+`per-sandbox-policy`. Task images that need per-command UID/GID switching, such
+as SWE-bench Pro, must start as root and provide util-linux `setpriv`.
+Checked-in examples are
 [Hermes](../profiles/hermes-tb2-fix-git-deepseek-k8s-pods.json) and
 [OpenClaw](../profiles/openclaw-tb2-fix-git-deepseek-k8s-pods.json). See the
 [Kubernetes implementation](implementation/kubernetes.md) for its constraints

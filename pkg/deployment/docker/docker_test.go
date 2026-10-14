@@ -260,7 +260,7 @@ func TestExecPreservesCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := fake.execs["exec-1"]
-	if !slices.Equal(created.Cmd[6:], append([]string{command.Path}, command.Args...)) || created.WorkingDir != command.Dir || created.User != command.User || !slices.Equal(created.Env, []string{"FIRST=$(literal)", "SECOND=two words"}) {
+	if !slices.Equal(created.Cmd, append([]string{command.Path}, command.Args...)) || created.WorkingDir != command.Dir || created.User != command.User || !slices.Equal(created.Env, []string{"FIRST=$(literal)", "SECOND=two words"}) {
 		t.Fatalf("exec request=%+v", created)
 	}
 	if result.Duration <= 0 || result.ExitCode != 0 || !strings.Contains(result.Stderr, "agent diagnostic") {
@@ -279,8 +279,7 @@ func TestExecEnforcesOutputLimitIncludingBufferedStderr(t *testing.T) {
 	if err := manager.Start(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
-	// Exercise a short stderr record retained alongside the final exit trailer.
-	// Its bytes reach the bounded buffer only when the trailer is removed.
+	// Even a short stderr record must obey the configured limit.
 	fake.stderrOnly = true
 	if _, err := manager.Exec(context.Background(), id, core.Command{Path: "/launcher", OutputLimitBytes: 4}); err == nil {
 		t.Fatal("stderr overflow was accepted")

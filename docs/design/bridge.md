@@ -70,7 +70,8 @@ same run network and have their own unique service names.
 
 Harness completion is authoritative for completed tool calls. Revocation closes
 bridge-owned access and handlers; it does not snapshot, classify, or sweep sandbox
-processes. Existing command cancellation retains its targeted execution semantics.
+processes. Command cancellation closes the backend execution transport and may
+leave the command running, as with native Docker or Kubernetes exec.
 The live sandbox, including benchmark services and background work, remains
 available to evaluation. There are no leases, heartbeats, renewal RPCs, or
 controller-liveness watchdogs; abrupt Runner crashes may need operator cleanup.

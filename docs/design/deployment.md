@@ -13,7 +13,7 @@ operations, run-owned connectivity, and logical task attachments.
 | `Validate(ctx, id, Request, secrets)` | Verify identity, ownership, isolation and absence of supplied secrets from metadata; do not retain secrets. |
 | `UploadArchive`, `DownloadArchive` | Preserve tar modes and ownership; return source metadata for download policy. |
 | `Start`, `Running` | Start a runtime and inspect its running state; application readiness belongs to the component. |
-| `Exec`, `ExecStream` | Preserve exact argv and buffered/streamed I/O; cancellation confirms targeted process termination. |
+| `Exec`, `ExecStream` | Preserve exact argv and buffered/streamed I/O; cancellation closes the execution transport and may leave the command running. |
 | `Logs`, `LogsStream` | Retrieve bounded or streamed output. |
 | `Address(ctx, id, port)` | Resolve a host-reachable private service address, without a scheme. |
 | `ServiceRuntime.TaskAddress(ctx, id, port)` | Resolve a service address reachable by the harness on the shared attachment. |

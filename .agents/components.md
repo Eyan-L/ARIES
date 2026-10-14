@@ -37,7 +37,9 @@ Follow [Runner interfaces](../pkg/runner/interfaces.go) and [lifecycle](architec
   tool calls;
   leave sandbox processes intact for evaluation. Keep replay inputs private;
   use Moby for Docker.
-  Command cancellation must preserve the sandbox needed for evaluation.
+  Command cancellation closes execution transport, preserving native backend
+  semantics; it does not guarantee command termination. Keep the sandbox alive
+  for evaluation and confirm runtime removal at task cleanup.
 - Preserve benchmark-specific isolation: pinned inputs, sanitized candidate state,
   private test/reference material, and all required verifier checks. Do not change
   score meaning when refactoring evaluation.

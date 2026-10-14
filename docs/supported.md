@@ -47,7 +47,8 @@ guides above.
   `bin/aries-ssh-client` beside `bin/aries`. Both bridges require the matched Docker bridge image built with
   `make bridge-image`.
 - On the Kubernetes backend, a task that executes as a non-root user, as
-  SWE-bench Pro does, needs `setpriv`, GNU `chroot` or `python3` in its image.
+  SWE-bench Pro does, needs util-linux `setpriv` in its image and a root container
+  user for per-command UID/GID switching.
   Images need `/bin/sh`, and the bridge and derived Hermes images must be
   published to a registry the cluster pulls from. See the
   [Kubernetes implementation](implementation/kubernetes.md).

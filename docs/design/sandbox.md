@@ -58,15 +58,17 @@ as confirmed absence.
 
 Commands retain absolute executable paths and exact argument boundaries. The
 sandbox supplies default workdir and numeric execution identity; explicit
-evaluator identity overrides remain possible. Cancellation must terminate the
-command without stopping the sandbox needed for evaluation. Transfer limits,
+evaluator identity overrides remain possible. Cancellation closes the execution
+transport and may leave the command running, matching native backend behavior.
+The sandbox stays alive for evaluation; Stop removes its remaining processes.
+Transfer limits,
 private artifacts, and missing-file semantics are part of the isolation boundary.
 [Docker mechanisms](../implementation/docker.md) explain the current realization.
 
 ## Substitution and validation
 
 A replacement must preserve task identity, isolation, live and fresh evaluation sandboxes, command
-semantics, bounded cancellation cleanup, and positive absence checks. Implement
+semantics, bounded transport cancellation, and positive runtime absence checks. Implement
 provider-specific operations beneath the component policy and select them through
 explicit composition. Supporting the interface alone does not establish support
 for every bridge or benchmark.
@@ -74,6 +76,6 @@ for every bridge or benchmark.
 Existing [sandbox unit tests](../../pkg/sandbox/sandbox_test.go) cover startup
 rollback, ownership, stop retries, command defaults, transfers, and missing-file
 classification. [Integration cases](../../pkg/sandbox/sandbox_integration_test.go)
-cover the real Docker lifecycle and targeted cancellation;
+cover the real Docker lifecycle and cancellation without command termination;
 [isolation cases](../../pkg/sandbox/isolation_integration_test.go) cover concurrent
 occurrences. These are verification entry points, not evidence of a new test run.

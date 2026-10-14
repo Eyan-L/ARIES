@@ -51,10 +51,12 @@ listener port. Protocol code does not probe interfaces or assume SSH port 2222.
 Search URLs use unique sandbox runtime names. Provider-specific address inspection
 stays in Docker, as described in [endpoint handoff](../design/deployment.md#endpoint-handoff).
 
-[Streaming execution](../../pkg/deployment/docker/exec.go) preserves argv and
-confirms targeted process-group termination on command cancellation without
-stopping the sandbox. The sandbox applies agent defaults; explicit evaluator root
-commands retain their requested execution identity.
+[Streaming execution](../../pkg/deployment/docker/exec.go) sends argv, workdir,
+environment and user directly to Moby exec, demultiplexes its output, and reads
+the exit status from exec inspection. Cancellation closes the attached connection;
+the command may continue running until it exits or the sandbox is removed. No
+shell supervisor or PID bookkeeping is added. The sandbox applies agent defaults;
+explicit evaluator root commands retain their requested execution identity.
 
 Archive transport returns source metadata for bounded, regular-file checks.
 The sandbox confines downloads to its output root, validates tar content, and

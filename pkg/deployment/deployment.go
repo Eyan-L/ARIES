@@ -21,7 +21,8 @@ var ErrAllocationUnconfirmed = errors.New("deployment allocation unconfirmed")
 // carry tar modes and ownership to the backend; harness readiness must verify
 // effective runtime permissions. Downloads return runner.ErrNotFound only for a missing
 // source in an existing runtime; missing log runtimes also wrap ErrNotFound.
-// Exec and ExecStream preserve argv and confirm targeted process termination on cancellation.
+// Exec and ExecStream preserve argv; cancellation closes the execution transport
+// without guaranteeing command termination. Stop owns confirmed runtime removal.
 // Address returns a host-reachable private service address, without a scheme.
 type Deployment interface {
 	Runtime

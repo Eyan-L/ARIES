@@ -100,12 +100,12 @@ The pod is `Running` from `Create` onwards. "Started" is therefore a logical
 state of the runtime: it means the marker file exists and the gate has replaced
 itself with the requested command, which becomes PID 1 with its exact argv.
 `/run/aries-gate` is an `emptyDir` volume that ARIES mounts into every pod,
-outside the image's filesystem; exec bookkeeping lives there too.
+outside the image's filesystem.
 
 Three consequences are explicit provider constraints:
 
-- **Images need `/bin/sh`.** Sandbox images also need `tar`, `stat` and
-  `setsid` for file transfer and for exec that can be cancelled.
+- **Images need `/bin/sh`.** Sandbox images also need `tar` and `stat` for file
+  transfer. Per-command user switching requires util-linux `setpriv`.
 - **An unset entrypoint is not preserved.** The cluster API does not report an
   image's entrypoint, so a request without one runs its arguments directly.
   OpenClaw relies on this and its launcher does not need the image entrypoint.
@@ -124,21 +124,20 @@ need none.
 
 ## Execution and transfer
 
-`Exec` and `ExecStream` use the same wrapper as the Docker provider: the command
-runs under `setsid` in its own session, its PID is recorded, and its exit status
-travels in a trailer on stderr. The trailer matters here because `kubectl`
-itself exits nonzero on transport failures, which would otherwise be
-indistinguishable from a failing command. Cancellation and timeouts signal the
-recorded process group and confirm it is gone before returning.
+`Exec` and `ExecStream` forward the command through `kubectl exec`, using a small
+positional-argument shell command to change directory when needed before
+`exec "$@"`. Output and the exit code come from kubectl. A nonzero exit can
+therefore also indicate a kubectl transport failure. Cancellation stops the local
+kubectl process and may leave the command running in the pod. There is no PID
+bookkeeping or remote process-group cleanup; runtime removal remains responsible
+for removing remaining processes.
 
 `kubectl exec` cannot select a user; a command always starts as the container's
 own user. SWE-bench Pro runs the agent's commands as UID 65532 and ARIES's own
-as root, so a command that requests another user starts as root and the wrapper
-drops to the requested UID and GID, with no supplementary groups, before running
-it. It uses the first of `setpriv`, GNU `chroot --userspec` or `python3` that
-works in the image, and fails with a clear error when none does. The sandbox
-container must therefore start as root. `HOME` is set to `/` for such a command,
-as Docker does for a UID with no account.
+as root, so a command that requests another user starts as root and uses
+`setpriv --reuid UID --regid GID --clear-groups` before running it. Such images
+must provide util-linux `setpriv`, and the sandbox container must start as root.
+`HOME` is set to `/` for such a command, as Docker does for a UID with no account.
 
 Archives move as tar streams over exec. Pod logs are a single interleaved
 stream, so they arrive on stdout only.

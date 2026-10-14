@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"github.com/hyscale-lab/aries/pkg/core"
 	deploymentdocker "github.com/hyscale-lab/aries/pkg/deployment/docker"
 	"github.com/hyscale-lab/aries/pkg/monitor"
+	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/client"
 	"github.com/sirupsen/logrus"
 )
@@ -184,6 +186,24 @@ func TestDockerSandboxRealLifecycle(t *testing.T) {
 	}
 	assertExec(t, ctx, sandbox, core.Command{Path: "/bin/cat", Stdin: []byte("stdin-bytes")}, 0, "stdin-bytes", "")
 	assertExec(t, ctx, sandbox, core.Command{Path: "/bin/sh", Args: []string{"-c", "printf stdout; printf stderr >&2; exit 7"}}, 7, "stdout", "stderr")
+	// Exec must inherit the same umask as native Docker exec.
+	native, err := api.ExecCreate(ctx, sandbox.ContainerID(), client.ExecCreateOptions{
+		Cmd: []string{"/bin/sh", "-c", "umask"}, AttachStdout: true, AttachStderr: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached, err := api.ExecAttach(ctx, native.ID, client.ExecAttachOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nativeStdout, nativeStderr bytes.Buffer
+	_, err = stdcopy.StdCopy(&nativeStdout, &nativeStderr, attached.Reader)
+	attached.Close()
+	if err != nil || nativeStdout.Len() == 0 || nativeStderr.Len() != 0 {
+		t.Fatalf("native umask = %q, %q, %v", nativeStdout.String(), nativeStderr.String(), err)
+	}
+	assertExec(t, ctx, sandbox, core.Command{Path: "/bin/sh", Args: []string{"-c", "umask"}}, 0, nativeStdout.String(), "")
 
 	uploadSource := filepath.Join(t.TempDir(), "upload.bin")
 	wantBytes := []byte{0, 1, 2, 3, 255, '\n'}
@@ -353,7 +373,7 @@ func containsEnvironment(environment []string, want string) bool {
 	return false
 }
 
-func TestExecCancellationKillsOnlyItsProcessGroup(t *testing.T) {
+func TestExecCancellationPreservesNativeProcesses(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	api, err := client.New(client.FromEnv, client.WithUserAgent("aries-sandbox-integration-test/1"))
@@ -386,13 +406,13 @@ func TestExecCancellationKillsOnlyItsProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertExec(t, ctx, sandbox, core.Command{Path: "/bin/sh", Args: []string{"-c", "setsid sleep 60 >/dev/null 2>&1 & echo $! > /work/unrelated.pid; printf preserved > /work/unrelated.state"}}, 0, "", "")
+	assertExec(t, ctx, sandbox, core.Command{Path: "/bin/sh", Args: []string{"-c", "sleep 60 </dev/null >/dev/null 2>&1 & echo $! > /work/unrelated.pid; printf preserved > /work/unrelated.state"}}, 0, "", "")
 	unrelatedPID := strings.TrimSpace(execForTest(t, ctx, sandbox, core.Command{Path: "/bin/cat", Args: []string{"/work/unrelated.pid"}}).Stdout)
 
 	started := time.Now()
 	_, err = sandbox.Exec(ctx, core.Command{
 		Path:    "/bin/sh",
-		Args:    []string{"-c", "echo $$ > /work/canceled.pid; trap '' TERM; while :; do sleep 1; done"},
+		Args:    []string{"-c", "echo $$ > /work/disconnected.pid; exec sleep 60"},
 		Timeout: 400 * time.Millisecond,
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -411,8 +431,8 @@ func TestExecCancellationKillsOnlyItsProcessGroup(t *testing.T) {
 	}
 	assertExec(t, ctx, sandbox, core.Command{Path: "/bin/cat", Args: []string{"/work/unrelated.state"}}, 0, "preserved", "")
 	assertExec(t, ctx, sandbox, core.Command{Path: "/bin/sh", Args: []string{"-c", "test -d /proc/$1", "aries-check", unrelatedPID}}, 0, "", "")
-	canceledPID := strings.TrimSpace(execForTest(t, ctx, sandbox, core.Command{Path: "/bin/cat", Args: []string{"/work/canceled.pid"}}).Stdout)
-	assertExec(t, ctx, sandbox, core.Command{Path: "/bin/sh", Args: []string{"-c", "test ! -d /proc/$1", "aries-check", canceledPID}}, 0, "", "")
+	disconnectedPID := strings.TrimSpace(execForTest(t, ctx, sandbox, core.Command{Path: "/bin/cat", Args: []string{"/work/disconnected.pid"}}).Stdout)
+	assertExec(t, ctx, sandbox, core.Command{Path: "/bin/sh", Args: []string{"-c", "test -d /proc/$1", "aries-check", disconnectedPID}}, 0, "", "")
 
 	if err := manager.Stop(ctx, live); err != nil {
 		t.Fatalf("Stop() error = %v", err)

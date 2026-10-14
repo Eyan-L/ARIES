@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -66,10 +65,6 @@ type fakeClient struct {
 	execOptions    client.ExecCreateOptions
 	execExit       int
 	execRunning    bool
-	controlExit    int
-	controlErr     error
-	controlOptions client.ExecCreateOptions
-	leaveExecAlive bool
 	execCreates    int
 	attach         func(net.Conn)
 	logs           []byte
@@ -81,13 +76,6 @@ type fakeClient struct {
 	downloadCalls  int
 	closeCalls     int
 	closeErr       error
-
-	// Docker answers an exec's attach before it starts the process: the first
-	// unstartedInspects inspects report an exec it has not started yet, as
-	// running (marked, with no process yet) when unstartedRunning is set.
-	unstartedInspects int
-	unstartedRunning  bool
-	failedStart       bool
 }
 
 func (f *fakeClient) Close() error {
@@ -164,16 +152,6 @@ func (f *missingSecurityOptClient) ContainerInspect(ctx context.Context, id stri
 	return result, err
 }
 
-func (f *fakeClient) ContainerTop(context.Context, string, client.ContainerTopOptions) (client.ContainerTopResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	processes := [][]string{}
-	if f.execRunning {
-		processes = append(processes, []string{"100", "1", "100"}, []string{"101", "100", "101"})
-	}
-	return client.ContainerTopResult{Titles: []string{"PID", "PPID", "PGID"}, Processes: processes}, nil
-}
-
 func (f *fakeClient) ContainerLogs(context.Context, string, client.ContainerLogsOptions) (client.ContainerLogsResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -197,13 +175,7 @@ func (f *fakeClient) ContainerRemove(context.Context, string, client.ContainerRe
 func (f *fakeClient) ExecCreate(_ context.Context, _ string, options client.ExecCreateOptions) (client.ExecCreateResult, error) {
 	f.mu.Lock()
 	f.execCreates++
-	if len(options.Cmd) > 2 && options.Cmd[2] == cancelExecShell {
-		f.controlOptions = options
-		f.mu.Unlock()
-		return client.ExecCreateResult{ID: "control-id"}, nil
-	}
 	f.execOptions = options
-	f.execRunning = f.execRunning || f.leaveExecAlive
 	f.mu.Unlock()
 	return client.ExecCreateResult{ID: "exec-id"}, nil
 }
@@ -218,40 +190,15 @@ func (f *fakeClient) ExecAttach(context.Context, string, client.ExecAttachOption
 		if handler != nil {
 			handler(daemonConn)
 		}
-		f.mu.Lock()
-		token, exitCode := f.execOptions.Cmd[5], f.execExit
-		f.mu.Unlock()
-		writeFrame(daemonConn, stdcopy.Stderr, []byte("\x1eARIES_EXEC_EXIT_"+token+"="+strconv.Itoa(exitCode)+"\x1f"))
+
 	}()
 	return client.ExecAttachResult{HijackedResponse: client.NewHijackedResponse(clientConn, "application/vnd.docker.multiplexed-stream")}, nil
-}
-
-func (f *fakeClient) ExecStart(context.Context, string, client.ExecStartOptions) (client.ExecStartResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.controlErr != nil {
-		return client.ExecStartResult{}, f.controlErr
-	}
-	if f.controlExit == 0 && !f.leaveExecAlive {
-		f.execRunning = false
-	}
-	return client.ExecStartResult{}, nil
 }
 
 func (f *fakeClient) ExecInspect(_ context.Context, execID string, _ client.ExecInspectOptions) (client.ExecInspectResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if execID == "control-id" {
-		return client.ExecInspectResult{ID: execID, ContainerID: f.containerID, ExitCode: f.controlExit}, nil
-	}
-	if f.unstartedInspects > 0 {
-		f.unstartedInspects--
-		return client.ExecInspectResult{ID: execID, ContainerID: f.containerID, Running: f.unstartedRunning}, nil
-	}
-	if f.failedStart {
-		return client.ExecInspectResult{ID: execID, ContainerID: f.containerID, ExitCode: 126}, nil
-	}
-	return client.ExecInspectResult{ID: execID, ContainerID: f.containerID, Running: f.execRunning, ExitCode: f.execExit, PID: 100}, nil
+	return client.ExecInspectResult{ID: execID, ContainerID: f.containerID, Running: f.execRunning, ExitCode: f.execExit}, nil
 }
 
 func (f *fakeClient) CopyToContainer(_ context.Context, _ string, options client.CopyToContainerOptions) (client.CopyToContainerResult, error) {
@@ -280,7 +227,7 @@ func (f *fakeClient) CopyFromContainer(context.Context, string, client.CopyFromC
 
 func startSandbox(t *testing.T, fake *fakeClient) *execution {
 	t.Helper()
-	return &execution{client: fake, containerID: "container-id", cleanupTimeout: time.Second}
+	return &execution{client: fake, containerID: "container-id"}
 }
 func writeFrame(writer io.Writer, stream stdcopy.StdType, payload []byte) {
 	header := make([]byte, 8)
@@ -308,7 +255,7 @@ func TestExecStreamsStdinAndSeparatesOutput(t *testing.T) {
 	if err != nil || result.ExitCode != 7 || result.Stdout != "out" || result.Stderr != "\x1eARIES_EXEC_EXIT_spoof=99\x1ferr" || result.Duration <= 0 {
 		t.Fatalf("Exec() = %#v, %v", result, err)
 	}
-	if len(fake.execOptions.Cmd) != 8 || fake.execOptions.Cmd[2] != execShell || !strings.HasPrefix(fake.execOptions.Cmd[4], execStatePrefix) || !reflect.DeepEqual(fake.execOptions.Cmd[6:], []string{"/bin/tool", "arg"}) || !reflect.DeepEqual(fake.execOptions.Env, []string{"A=1", "B=2"}) {
+	if !reflect.DeepEqual(fake.execOptions.Cmd, []string{"/bin/tool", "arg"}) || !reflect.DeepEqual(fake.execOptions.Env, []string{"A=1", "B=2"}) {
 		t.Fatalf("exec options = %#v", fake.execOptions)
 	}
 }
@@ -379,29 +326,31 @@ func TestCommandOutputLimitValidation(t *testing.T) {
 	}
 }
 
-func TestExecCancellationReturnsTerminationConfirmationFailure(t *testing.T) {
-	fake := &fakeClient{execRunning: true, leaveExecAlive: true}
-	fake.attach = func(conn net.Conn) { _, _ = io.Copy(io.Discard, conn) }
-	sandbox := startSandbox(t, fake)
-	sandbox.cleanupTimeout = 60 * time.Millisecond
+func TestExecCancellationOnlyClosesAttachment(t *testing.T) {
+	fake := &fakeClient{execRunning: true}
+	started := make(chan struct{})
+	disconnected := make(chan struct{})
+	fake.attach = func(conn net.Conn) {
+		close(started)
+		_, _ = io.Copy(io.Discard, conn)
+		close(disconnected)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := sandbox.ExecStream(ctx, core.Command{Path: "/bin/sleep", Args: []string{"60"}}, nil, io.Discard, io.Discard)
-	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "confirm terminated Docker exec process-group exit") {
-		t.Fatalf("ExecStream() error = %v", err)
+	defer cancel()
+	go func() { <-started; cancel() }()
+	result, err := startSandbox(t, fake).ExecStream(ctx, core.Command{Path: "/bin/sleep", Args: []string{"60"}}, nil, io.Discard, io.Discard)
+	if !errors.Is(err, context.Canceled) || result.ExitCode != -1 {
+		t.Fatalf("ExecStream() = %#v, %v", result, err)
 	}
+	<-disconnected
 	fake.mu.Lock()
-	execCreates := fake.execCreates
-	fake.mu.Unlock()
-	if execCreates != 2 {
-		t.Fatalf("exec create count = %d, want command plus targeted termination helper", execCreates)
-	}
-	if fake.controlOptions.User != "0:0" {
-		t.Fatalf("termination helper user = %q, want root", fake.controlOptions.User)
+	defer fake.mu.Unlock()
+	if fake.execCreates != 1 || !fake.execRunning {
+		t.Fatalf("cancellation changed remote execution: creates=%d running=%v", fake.execCreates, fake.execRunning)
 	}
 }
 
-func TestExecCancellationWinsConcurrentCopyErrorAfterConfirmedTermination(t *testing.T) {
+func TestExecCancellationWinsConcurrentCopyError(t *testing.T) {
 	copyErr := errors.New("attach copy failed")
 	fake := &fakeClient{execRunning: true}
 	fake.attach = func(conn net.Conn) {
@@ -416,23 +365,7 @@ func TestExecCancellationWinsConcurrentCopyErrorAfterConfirmedTermination(t *tes
 	}
 }
 
-func TestExecCancellationJoinsConcurrentCopyErrorOnlyWithTerminationFailure(t *testing.T) {
-	copyErr := errors.New("attach copy failed")
-	fake := &fakeClient{execRunning: true, leaveExecAlive: true}
-	fake.attach = func(conn net.Conn) {
-		writeFrame(conn, stdcopy.Stdout, []byte("trigger cancellation"))
-	}
-	sandbox := startSandbox(t, fake)
-	sandbox.cleanupTimeout = 60 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	_, err := sandbox.ExecStream(ctx, core.Command{Path: "/bin/sleep", Args: []string{"60"}}, nil,
-		cancelErrorWriter{cancel: cancel, err: copyErr}, io.Discard)
-	if !errors.Is(err, context.Canceled) || errors.Is(err, copyErr) || !strings.Contains(err.Error(), "confirm terminated Docker exec process-group exit") {
-		t.Fatalf("ExecStream() error = %v, want cancellation joined only with termination failure", err)
-	}
-}
-
-func TestExecOrdinaryCopyErrorRetainsCauseAfterTargetedCleanup(t *testing.T) {
+func TestExecOrdinaryCopyErrorRetainsCause(t *testing.T) {
 	copyErr := errors.New("attach copy failed before cancellation")
 	fake := &fakeClient{execRunning: true}
 	fake.attach = func(conn net.Conn) {
@@ -458,6 +391,29 @@ func TestExecStreamWritesWithoutBufferingResult(t *testing.T) {
 	result, err := sandbox.ExecStream(context.Background(), core.Command{Path: "/bin/cat"}, strings.NewReader("late"), &stdout, io.Discard)
 	if err != nil || stdout.String() != "seen:late" || result.Stdout != "" || result.ExitCode != 0 {
 		t.Fatalf("ExecStream() = %#v, stdout=%q, error=%v", result, stdout.String(), err)
+	}
+}
+
+func TestExecReturnsStatusWhenCommandDoesNotReadStdin(t *testing.T) {
+	for range 20 {
+		fake := &fakeClient{execExit: 7}
+		fake.attach = func(conn net.Conn) { writeFrame(conn, stdcopy.Stdout, []byte("complete")) }
+		result, err := startSandbox(t, fake).Exec(context.Background(), core.Command{
+			Path: "/bin/tool", Stdin: make([]byte, 32<<10),
+		})
+		if err != nil || result.ExitCode != 7 || result.Stdout != "complete" {
+			t.Fatalf("Exec() = %#v, %v", result, err)
+		}
+	}
+}
+
+func TestExecStreamLimitsInput(t *testing.T) {
+	fake := &fakeClient{}
+	fake.attach = func(conn net.Conn) { _, _ = io.Copy(io.Discard, conn) }
+	_, err := startSandbox(t, fake).ExecStream(context.Background(), core.Command{Path: "/bin/cat"},
+		bytes.NewReader(make([]byte, maxExecInput+1)), nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "stdin exceeds") {
+		t.Fatalf("ExecStream() error = %v", err)
 	}
 }
 
@@ -497,55 +453,16 @@ func TestExecStreamReturnsWhileSSHStdinRemainsOpen(t *testing.T) {
 	}
 }
 
-func TestExecWaitsForAnExecDockerHasNotStarted(t *testing.T) {
-	// Taking the first "not running, no PID" inspect for an exit closed the
-	// stream after execDrainTimeout, before the command wrote its trailer.
-	fake := &fakeClient{}
-	sandbox := startSandbox(t, fake)
-	fake.mu.Lock()
-	fake.execRunning, fake.execExit, fake.unstartedInspects = true, 3, 3
-	fake.attach = func(conn net.Conn) {
-		time.Sleep(4 * execDrainTimeout)
-		writeFrame(conn, stdcopy.Stdout, []byte("done"))
-		fake.mu.Lock()
-		fake.execRunning = false
-		fake.mu.Unlock()
-	}
-	fake.mu.Unlock()
-	result, err := sandbox.Exec(context.Background(), core.Command{Path: "/bin/sleep", Args: []string{"1"}})
-	if err != nil || result.ExitCode != 3 || result.Stdout != "done" {
-		t.Fatalf("Exec() = %#v, %v", result, err)
-	}
-}
-
 func TestExecDoesNotWaitForAnExecThatFailedToStart(t *testing.T) {
 	fake := &fakeClient{}
 	sandbox := startSandbox(t, fake)
 	fake.mu.Lock()
-	fake.failedStart, fake.execExit = true, 126
+	fake.execExit = 126
 	fake.mu.Unlock()
 	began := time.Now()
 	result, err := sandbox.Exec(context.Background(), core.Command{Path: "/missing"})
 	if err != nil || result.ExitCode != 126 || time.Since(began) > 5*time.Second {
 		t.Fatalf("Exec() = %#v, %v after %s", result, err, time.Since(began))
-	}
-}
-
-func TestWaitForExecExitGivesUpOnAnExecThatNeverStarts(t *testing.T) {
-	sandbox := &execution{client: &fakeClient{unstartedInspects: 1 << 30}}
-	err := sandbox.waitForExecExit(context.Background(), "exec-id", 100*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "did not start within 100ms") {
-		t.Fatalf("waitForExecExit() = %v", err)
-	}
-}
-
-func TestWaitForExecExitGivesUpOnAnExecStuckStarting(t *testing.T) {
-	// Docker marks an exec running before it creates the process; the start
-	// bound applies to that state too.
-	sandbox := &execution{client: &fakeClient{unstartedInspects: 1 << 30, unstartedRunning: true}}
-	err := sandbox.waitForExecExit(context.Background(), "exec-id", 100*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "did not start within 100ms") {
-		t.Fatalf("waitForExecExit() = %v", err)
 	}
 }
 
@@ -584,34 +501,5 @@ func TestCancellationJoinsOutputCopyBeforeReturning(t *testing.T) {
 	}
 	if output.String() != "pending output" {
 		t.Fatalf("output=%q", output.String())
-	}
-}
-
-type observedInspectClient struct {
-	*fakeClient
-	inspected chan context.Context
-	once      sync.Once
-}
-
-func (f *observedInspectClient) ExecInspect(ctx context.Context, id string, options client.ExecInspectOptions) (client.ExecInspectResult, error) {
-	if _, bounded := ctx.Deadline(); id == "exec-id" && !bounded {
-		f.once.Do(func() { f.inspected <- ctx })
-	}
-	return f.fakeClient.ExecInspect(ctx, id, options)
-}
-func TestCopyFailureCancelsInspectorAfterFailedTermination(t *testing.T) {
-	failure := errors.New("output failed")
-	base := &fakeClient{execRunning: true, controlErr: errors.New("termination failed")}
-	base.attach = func(conn net.Conn) { writeFrame(conn, stdcopy.Stdout, []byte("output")) }
-	fake := &observedInspectClient{fakeClient: base, inspected: make(chan context.Context, 1)}
-	_, err := (&Manager{client: fake}).ExecStream(context.Background(), "container-id", core.Command{Path: "/bin/tool"}, nil, cancelErrorWriter{err: failure}, nil)
-	if !errors.Is(err, failure) {
-		t.Fatalf("error=%v", err)
-	}
-	inspectorContext := <-fake.inspected
-	select {
-	case <-inspectorContext.Done():
-	case <-time.After(time.Second):
-		t.Fatal("exec inspector was left polling after failure")
 	}
 }
