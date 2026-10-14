@@ -20,8 +20,8 @@ transport serves a whole run.
 _Avoid_: route, protocol (when the transport is meant)
 
 **Dialect**:
-The command grammar one harness speaks for tool calls. A dialect is independent of the
-transport.
+The command grammar one harness speaks for tool calls over SSH. The gRPC transport has typed
+calls and no dialect.
 _Avoid_: wire grammar
 
 **Tool-call record**:
@@ -36,7 +36,7 @@ It keeps commands, stdin and written content, never output or read content.
 
 - A **Run** has exactly one **Tool bridge** and exactly one **Transport**.
 - A **Tool bridge** registers many sandboxes over the **Control plane**, one per task.
-- A **Harness** speaks one **Dialect** over the run's **Transport**.
+- A **Harness** speaks one **Dialect** over SSH, or typed calls over gRPC.
 - A **Transport** writes **Tool-call records** and, when the profile opts in, a **Raw log**.
 
 ## Flagged ambiguities
