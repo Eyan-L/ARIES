@@ -48,8 +48,9 @@ service, finalize shared observation, remove shared connectivity and close
 transports before persisting the run result. Record shared outcomes separately
 from task counts and measurements.
 
-Each admitted occurrence gets fresh owners, even for repeated task IDs. Release
-owned resources using fresh bounded cleanup contexts after cancellation. Bridge
+Load the selected catalog once per run; keep shared metadata immutable and private
+verifier inputs inside the benchmark. Each occurrence gets fresh mutable benchmark
+state and runtime owners, even for repeated task IDs. Release owned resources using fresh bounded cleanup contexts after cancellation. Bridge
 revocation closes access and leaves sandbox processes intact for evaluation.
 Runner owns explicit bridge revocation; do not add assignment leases or
 controller-liveness supervision. Abrupt Runner crashes may need operator cleanup.
