@@ -10,6 +10,7 @@ its components on a cluster, and what that provider does not support, see
 k8s/
   create-cluster.sh     # runs Invitro's setup, then apply-aries.sh, in one go
   apply-aries.sh        # applies everything below to an existing cluster
+  publish-images.sh     # builds and pushes the bridge and Hermes images
   aries/                # the ARIES chart: runner and bridge RBAC, dashboard
   monitoring/           # values overlay for an existing kube-prometheus-stack
 ```
@@ -26,7 +27,10 @@ k8s/
 Invitro also installs Knative, Istio and MetalLB. ARIES does not use them; its
 pods live in their own namespace.
 
-## 1 and 2 in one command
+## Quick start: build the cluster and apply ARIES with one command
+
+`create-cluster.sh` builds the cluster and applies ARIES in one go. Steps 1 and
+2 below do the same separately, for when you need to run them one at a time.
 
 From your own machine, with passwordless SSH to every node:
 
@@ -108,24 +112,41 @@ for each run and removes them afterwards.
 
 ## 3. Publish the images the cluster pulls
 
-Docker runs build two images locally. A cluster cannot see them, so push them
-to a registry your nodes can pull from and map them in the profile.
-
-**The bridge image** must contain `aries-bridge`, `kubectl` and `/bin/sh`. Use a
-base whose `kubectl` matches the cluster's version, as printed by the script:
+Docker runs build two images locally. A cluster cannot see them, so they are
+published to the lab's GitHub Container Registry, which the checked-in
+`-k8s-pods` profiles already map to. Log in with a classic personal access token
+that holds `write:packages`, then publish:
 
 ```sh
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/aries-bridge ./cmd/aries-bridge
-docker buildx build --platform linux/amd64 -f Dockerfile.bridge \
-  --build-arg BASE_IMAGE=alpine/k8s:<cluster version> \
-  -t <registry>/aries-bridge:v1 --push .
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
+make k8s-images REGISTRY=ghcr.io/hyscale-lab
 ```
 
-**The Hermes image** is the pinned upstream image plus `hermes-otel`. Build it
-on a Docker host with `./bin/aries setup profiles/hermes-tb2-fix-git-deepseek.json`,
-then tag and push the resulting `aries-local/hermes:<tag>` image under the same
-tag. OpenClaw and the task images are pulled from their public registries
-unchanged, so an OpenClaw run needs only the bridge image.
+The script checks the login before building, since otherwise GHCR refuses the
+push only once the build is done. GHCR creates a new package as private. Either
+make `aries-bridge` and `aries-hermes` public in the organization's package
+settings, or give the cluster a pull secret for `ghcr.io` with a token holding
+`read:packages` (see [Credentials](#credentials)). To use another registry, pass
+it as `REGISTRY`, for example `docker.io/<user>`, and change the profiles'
+`images` entries to match.
+
+`publish-images.sh` builds both images for `linux/amd64` with `docker buildx`
+and pushes them under the tags ARIES requests:
+
+- **`<registry>/aries-bridge`** is `aries-bridge` on
+  `bridge.kubernetes_base_image` from `configs/versions.json`, an `alpine/k8s`
+  image whose `kubectl` matches the Kubernetes version the pinned Invitro
+  installs. The script needs no cluster access. For a cluster on another
+  version, add `K8S_IMAGES_FLAGS="--kube-version <version>"` with the version
+  `apply-aries.sh` printed.
+- **`<registry>/aries-hermes`** is the pinned upstream Hermes image plus
+  `hermes-otel`, the same image `aries setup` builds for Docker.
+
+It ends by printing the `images` entries for the profile. `--only bridge` or
+`--only hermes` builds one image, `--platform linux/arm64` targets arm64 nodes,
+and `--dry-run` prints the build commands. OpenClaw and the task images are
+pulled from their public registries unchanged, so an OpenClaw run needs only
+the bridge image.
 
 ## 4. Set the profile
 
@@ -188,16 +209,19 @@ kubectl -n aries get pods -l app.kubernetes.io/managed-by=aries -o wide
   harness pod itself.
 - **Runner access.** `--runner-kubeconfig` uses the `aries` ServiceAccount's
   long-lived token (Secret `aries-token`). Delete that Secret to revoke it.
-- **Private registry.** Copy `aries/secret.yaml.example` to the gitignored
+- **Private images.** While the GHCR packages are private, copy
+  `aries/secret.yaml.example` (already set up for `ghcr.io`) to the gitignored
   `aries/secret.yaml`, fill it in, pass it with `--values`, and set
   `"image_pull_secret": "aries-registry"` in the profile.
 
 ## Status and caveats
 
 - **Supported set.** Terminal-Bench 2, SWE-bench Pro and Deep Research Bench,
-  with OpenClaw or Hermes in text mode. See
-  [the Kubernetes implementation](../docs/implementation/kubernetes.md) for what
-  SWE-bench Pro needs from a task image and how a task service is exposed.
+  with OpenClaw or Hermes in text mode. SWE-bench Pro needs no extra step: its
+  upstream images already start as root and include `setpriv`, which ARIES uses
+  to run the agent's commands as a non-root user (see
+  [the Kubernetes implementation](../docs/implementation/kubernetes.md#execution-and-transfer)).
+  That page also covers how a task service is exposed.
 - **Task network isolation** depends on the CNI enforcing NetworkPolicy. Calico
   does; under flannel the policies are created and silently ignored.
 - **Pod resource metrics** are read from Prometheus, so they need the
@@ -209,5 +233,9 @@ kubectl -n aries get pods -l app.kubernetes.io/managed-by=aries -o wide
   and in `resources.jsonl` alike.
 - **One bridge pod per run.** If it dies mid-run, the tasks in flight lose
   their tool access and their evidence, and evaluation is blocked for them.
-- **An interrupted runner can leave pods behind.** Remove them with
-  `kubectl -n aries delete pods,services,networkpolicies -l app.kubernetes.io/managed-by=aries`.
+- **An interrupted runner can leave pods behind.** `make k8s-clean` removes
+  the pods, services and NetworkPolicies ARIES labels
+  `app.kubernetes.io/managed-by=aries` in the `aries` namespace (`NAMESPACE=`
+  picks another), and keeps the chart's own objects. Every run shares that
+  label, so run it only when no runner is active in the namespace: it stops
+  runs in progress too.

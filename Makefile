@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint integration run setup k8s-cluster charts-lint charts-template
+.PHONY: build test test-race lint integration run setup k8s-cluster k8s-images k8s-clean charts-lint charts-template
 
 PROFILE ?= profiles/openclaw-tb2-fix-git-deepseek.json
 
@@ -61,6 +61,22 @@ bridge-image: build
 #   make k8s-cluster NODES="user@master user@runner user@worker1"
 k8s-cluster:
 	./k8s/create-cluster.sh $(K8S_FLAGS) $(NODES)
+
+# Build the bridge and Hermes images for the cluster and push them. REGISTRY is
+# a repository prefix; log in with docker login first.
+#   make k8s-images REGISTRY=docker.io/user
+#   make k8s-images REGISTRY=docker.io/user K8S_IMAGES_FLAGS="--kube-version 1.34.3"
+k8s-images:
+	./k8s/publish-images.sh $(K8S_IMAGES_FLAGS) $(REGISTRY)
+
+# Remove the pods, services and NetworkPolicies an interrupted runner left
+# behind. Every run's objects carry the same label, so this also stops any run
+# still in progress in the namespace. The chart's own objects are kept.
+#   make k8s-clean NAMESPACE=aries
+NAMESPACE ?= aries
+k8s-clean:
+	kubectl -n $(NAMESPACE) delete pods,services,networkpolicies \
+	  -l app.kubernetes.io/managed-by=aries --ignore-not-found --wait
 
 # Render the chart without a cluster. Catches template errors and, with
 # --dry-run, schema problems that only show up once values are merged.

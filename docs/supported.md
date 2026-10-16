@@ -48,9 +48,10 @@ guides above.
   `make bridge-image`.
 - On the Kubernetes backend, a task that executes as a non-root user, as
   SWE-bench Pro does, needs `setpriv` from `util-linux` in its image and a root container
-  user for per-command UID/GID switching.
+  user for per-command UID/GID switching. The upstream SWE-bench Pro images
+  provide both, so running it needs no extra step.
   Images need `/bin/sh`, and the bridge and derived Hermes images must be
-  published to a registry the cluster pulls from. See the
+  published to a registry the cluster pulls from; `make k8s-images` does that. See the
   [Kubernetes implementation](implementation/kubernetes.md).
 - Realtime mode is OpenClaw-only and needs a separate TTS credential. See the
   [realtime setup](configuration.md#realtime-openclaw-mode).

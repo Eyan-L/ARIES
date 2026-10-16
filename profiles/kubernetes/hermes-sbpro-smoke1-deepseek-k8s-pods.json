@@ -19,7 +19,7 @@
       "kubernetes": {
         "namespace": "aries",
         "images": {
-          "aries-local/hermes": "docker.io/jingxiang212/aries-hermes"
+          "aries-local/hermes": "ghcr.io/hyscale-lab/aries-hermes"
         },
         "node_selector": {
           "loader-nodetype": "worker"
@@ -47,7 +47,7 @@
         "namespace": "aries",
         "service_account": "aries-bridge",
         "images": {
-          "aries-bridge": "docker.io/jingxiang212/aries-bridge"
+          "aries-bridge": "ghcr.io/hyscale-lab/aries-bridge"
         },
         "node_selector": {
           "loader-nodetype": "worker"

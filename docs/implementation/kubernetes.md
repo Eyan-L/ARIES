@@ -24,7 +24,6 @@ flowchart LR
     end
 
     subgraph CLUSTER[Kubernetes cluster]
-        API[API server]
         PROM[Prometheus]
 
         subgraph NS[Namespace aries]
@@ -38,22 +37,22 @@ flowchart LR
         end
     end
 
-    R -- "kubectl: create, exec, delete pods and policies" --> API
+    R -- "kubectl: create, exec, delete pods and policies" --> NS
     R -. "port-forward: gateway" .-> H
     R -. "port-forward: gRPC control" .-> B
     R -. "pod metrics" .-> PROM
     H -- "model requests" --> M
     H -- "SSH tool calls" --> B
-    B -- "kubectl exec" --> API
-    API -- "exec" --> S
+    B -- "kubectl exec" --> S
     NP -.- S
 ```
 
 Solid arrows are the paths a task uses; dotted arrows are the Runner's own
-control and measurement connections.
-Nothing connects to a sandbox pod directly: the bridge and the Runner reach it
-through the API server's exec endpoint, which is why its NetworkPolicy can deny
-all ingress.
+control and measurement connections. The figure leaves out the API server,
+which every `kubectl` arrow actually passes through. In particular, the bridge
+and the Runner reach a sandbox pod through the API server's exec endpoint, never
+by connecting to it directly, which is why its NetworkPolicy can deny all
+ingress.
 
 | Runtime | Lifetime | Reached by |
 | --- | --- | --- |
@@ -135,9 +134,17 @@ for removing remaining processes.
 `kubectl exec` cannot select a user; a command always starts as the container's
 own user. SWE-bench Pro runs the agent's commands as UID 65532 and ARIES's own
 as root, so a command that requests another user starts as root and uses
-`setpriv --reuid UID --regid GID --clear-groups` before running it. Such images
-must provide `setpriv` from `util-linux`, and the sandbox container must start as root.
-`HOME` is set to `/` for such a command, as Docker does for a UID with no account.
+`setpriv --reuid UID --regid GID --clear-groups` before running it. `HOME` is
+set to `/` for such a command, as Docker does for a UID with no account.
+
+This needs two things from the task image: it must start as root, and it must
+provide `setpriv` from `util-linux`. **Running SWE-bench Pro needs no action from
+you.** ARIES runs the upstream images (`docker.io/jefzda/sweap-images`)
+unchanged, with no conversion step, and those images provide both: they set no
+`USER`, and their Debian bases include `util-linux`. Sampled images across Go,
+Python and TypeScript tasks all start as UID 0 with `/usr/bin/setpriv`. The
+requirement matters only if the pinned dataset moves to images built
+differently, such as on Alpine, which does not install `util-linux` by default.
 
 Archives move as tar streams over exec. Pod logs are a single interleaved
 stream, so they arrive on stdout only.
@@ -154,7 +161,11 @@ harness pods reach the bridge's per-sandbox SSH listeners.
 
 A cluster has one flat pod network, so isolation is expressed with
 NetworkPolicy. The task environment creates each sandbox's policy before its pod
-and removes it after the pod is gone:
+and removes it after the pod is gone. What the policy permits depends on the
+task's `allow_network`, which the [benchmark](benchmarks.md) sets per task and a
+profile cannot change: Terminal-Bench 2 and SWE-Atlas QA take it from
+`allow_internet` in the task's `task.toml`, while SWE-bench Pro, Deep Research
+Bench and Toolathlon always set it to `true`.
 
 | `allow_network` | Ingress | Egress |
 | --- | --- | --- |

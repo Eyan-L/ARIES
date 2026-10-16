@@ -8,6 +8,9 @@
 # agent must already allow passwordless logins.
 set -euo pipefail
 
+# This Invitro installs Kubernetes 1.34.3 through vHive v1.8.2. When the
+# revision changes, bump bridge.kubernetes_base_image in configs/versions.json
+# to the Kubernetes version it installs.
 INVITRO_REPO=${INVITRO_REPO:-https://github.com/vhive-serverless/invitro.git}
 INVITRO_REVISION=${INVITRO_REVISION:-49c90dfd977417a32ff4dbd767a8a82e794480b4}
 

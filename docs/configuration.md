@@ -149,6 +149,9 @@ The bridge runtime runs `aries-bridge` from the same build as `aries-ssh-client`
 image containing only `aries-bridge`, using `bridge.image` and `bridge.base_image`
 from the version catalog. Runner stages the separate `aries-ssh-client` binary
 directly into the OpenClaw harness; the bridge container does not need that client.
+For the Kubernetes backend, `make k8s-images` builds the bridge on
+`bridge.kubernetes_base_image` instead, which supplies `kubectl`; bump it with
+the Kubernetes version the pinned Invitro installs.
 Image preparation uses the selected daemon. Checked-in Docker bridge examples
 include [Hermes](../profiles/hermes-tb2-fix-git-deepseek.json) and
 [OpenClaw](../profiles/openclaw-tb2-fix-git-deepseek.json).
@@ -165,7 +168,7 @@ all select this backend and the same namespace; mixed compositions are rejected.
     "type": "hermes",
     "deployment": {
       "backend": "kubernetes",
-      "kubernetes": { "namespace": "aries", "images": { "aries-local/hermes": "registry.example/aries-hermes" } }
+      "kubernetes": { "namespace": "aries", "images": { "aries-local/hermes": "ghcr.io/hyscale-lab/aries-hermes" } }
     }
   },
   "sandbox": {
@@ -178,7 +181,7 @@ all select this backend and the same namespace; mixed compositions are rejected.
     "type": "hermes-ssh",
     "deployment": {
       "backend": "kubernetes",
-      "kubernetes": { "namespace": "aries", "service_account": "aries-bridge", "images": { "aries-bridge": "registry.example/aries-bridge" } }
+      "kubernetes": { "namespace": "aries", "service_account": "aries-bridge", "images": { "aries-bridge": "ghcr.io/hyscale-lab/aries-bridge" } }
     }
   }
 }
@@ -195,10 +198,13 @@ all select this backend and the same namespace; mixed compositions are rejected.
 | `images` | all | Maps an image ARIES builds locally to the reference the cluster pulls. A key without a tag maps the repository and keeps the requested tag. |
 
 The cluster pulls images, so `aries setup` builds nothing for this backend: the
-bridge image and the derived Hermes image must already be published. Each
+bridge image and the derived Hermes image must already be published;
+`make k8s-images` builds and pushes both (see
+[publishing the images](../k8s/README.md#3-publish-the-images-the-cluster-pulls)). Each
 sandbox gets its own NetworkPolicy and the effective run policy is
 `per-sandbox-policy`. Task images that need per-command UID/GID switching, such
-as SWE-bench Pro, must start as root and provide `setpriv` from `util-linux`.
+as SWE-bench Pro, must start as root and provide `setpriv` from `util-linux`;
+the upstream SWE-bench Pro images already do, so it needs no extra step.
 Checked-in examples are
 [Hermes](../profiles/kubernetes/hermes-tb2-fix-git-deepseek-k8s-pods.json) and
 [OpenClaw](../profiles/kubernetes/openclaw-tb2-fix-git-deepseek-k8s-pods.json). See the

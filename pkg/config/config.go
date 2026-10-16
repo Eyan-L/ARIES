@@ -512,6 +512,11 @@ type SWEbenchProVersions struct {
 type BridgeVersions struct {
 	Image     string `json:"image"`
 	BaseImage string `json:"base_image"`
+
+	// KubernetesBaseImage is the base k8s/publish-images.sh builds the
+	// Kubernetes bridge on. It supplies kubectl, so its version follows the
+	// Kubernetes version the pinned Invitro checkout installs.
+	KubernetesBaseImage string `json:"kubernetes_base_image,omitempty"`
 }
 
 type OpenClawVersions struct {
@@ -1296,6 +1301,11 @@ func (c Versions) validate() error {
 	if c.Bridge.BaseImage != "" {
 		if err := containerimage.ValidatePinnedTagOnly(c.Bridge.BaseImage); err != nil {
 			return fmt.Errorf("bridge.base_image: %w", err)
+		}
+	}
+	if c.Bridge.KubernetesBaseImage != "" {
+		if err := containerimage.ValidatePinnedTagOnly(c.Bridge.KubernetesBaseImage); err != nil {
+			return fmt.Errorf("bridge.kubernetes_base_image: %w", err)
 		}
 	}
 	if strings.TrimSpace(c.OpenClaw.Image) == "" {

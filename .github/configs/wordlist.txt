@@ -226,3 +226,5 @@ invitro
 invitro's
 jitter
 lowercased
+debian
+typescript
