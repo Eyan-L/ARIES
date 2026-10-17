@@ -48,8 +48,10 @@ guides above.
 - Each SSH bridge supports its corresponding harness. Crossed pairs are rejected
   before execution. Hermes requires `/bin/bash` in the task image; its bridge
   rejects Hermes's private `~/.hermes` file synchronization. OpenClaw requires
-  `bin/aries-ssh-client` beside `bin/aries`. Both bridges require the matched Docker bridge image built with
-  `make bridge-image`.
+  `bin/aries-ssh-client` beside `bin/aries`. OpenClaw and Hermes use the standard
+  Docker bridge image (`make bridge-image`). DSH preparation builds a separate
+  bridge image from its derived DSH image, including the native helper runtime;
+  see [DSH configuration](configuration.md#deepseek-harness-dsh).
 - Realtime mode is OpenClaw-only and needs a separate TTS credential. See the
   [realtime setup](configuration.md#realtime-openclaw-mode).
 - External model servers are operated separately from ARIES. ARIES does not
