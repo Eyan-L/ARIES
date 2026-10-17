@@ -9,7 +9,7 @@ voice setup remains in the [voice guide](../voice_mode.md).
 [`dsh.Manager`](../../pkg/harness/dsh/harness.go) composes the shared harness runtime
 and sends the benchmark instruction unchanged on stdin to one native headless
 invocation. Completion requires exit zero, a final root turn ending as
-`completed`, a nonblank `final` event and no pending root tool calls.
+`completed`, a `final` event whose text is not blank, and no pending root tool calls.
 
 The native `fs-ssh`, `subprocess-ssh` and `sandbox-ssh` providers replace their
 local counterparts. The matching helper runs under `/tmp/aries-dsh-runtime`
