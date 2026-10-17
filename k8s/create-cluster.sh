@@ -23,6 +23,7 @@ runner_dir=aries
 ssh_key=""
 ssh_options=()
 housekeeping=""
+prune=false
 
 usage() {
   cat <<'USAGE'
@@ -42,6 +43,8 @@ k8s/cluster.json.example. Command-line options win over the file.
                       addresses are not Invitro's default 10.0.1.x layout
   --housekeeping DUR  set the kubelet's --housekeeping-interval on every node,
                       such as 1s; Invitro leaves the 10s default
+  --prune-invitro     remove the Invitro components ARIES does not use, such
+                      as Knative, Istio and MetalLB
   --skip-cluster      the cluster already exists; only apply ARIES
   --no-runner         do not build and stage the runner on the loader node
   -h, --help          show this help
@@ -57,6 +60,7 @@ while [ $# -gt 0 ]; do
     --prometheus) prometheus=true; shift ;;
     --node-setup) node_setup=$2; shift 2 ;;
     --housekeeping) housekeeping=$2; shift 2 ;;
+    --prune-invitro) prune=true; shift ;;
     --skip-cluster) skip_cluster=true; shift ;;
     --no-runner) stage_runner=false; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -104,6 +108,7 @@ print("file_ssh_options=(" + " ".join(shlex.quote(option) for option in strings(
 for key in ("runner_dir", "ssh_key", "node_setup", "kubelet_housekeeping_interval"):
     print(f"file_{key}={shlex.quote(text(key))}")
 print("file_prometheus=" + ("true" if cfg.get("deploy_prometheus") is True else "false"))
+print("file_prune=" + ("true" if cfg.get("prune_invitro") is True else "false"))
 PY
   ) || exit 1
   eval "$parsed"
@@ -113,6 +118,7 @@ PY
   ssh_key=$file_ssh_key
   [ -n "$node_setup" ] || node_setup=$file_node_setup
   [ "$prometheus" = true ] || prometheus=$file_prometheus
+  [ "$prune" = true ] || prune=$file_prune
   [ -n "$housekeeping" ] || housekeeping=$file_kubelet_housekeeping_interval
 fi
 case "$housekeeping" in
@@ -204,6 +210,7 @@ fi
 echo "==> Applying ARIES on $master"
 apply_args=(--runner-kubeconfig '$HOME/aries-kubeconfig')
 [ "$prometheus" = false ] || apply_args+=(--monitoring)
+[ "$prune" = false ] || apply_args+=(--prune-invitro)
 # Ship the committed k8s/ tree only, so local credentials never leave this
 # machine. Invitro installs helm with Prometheus; install it otherwise.
 applied=$(mktemp)

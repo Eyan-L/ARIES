@@ -6,7 +6,8 @@
 # whose kubectl and helm reach it as a cluster admin, such as the master node.
 #
 # It installs the ARIES chart (service accounts and RBAC only), and optionally
-# overlays the monitoring stack and writes a namespaced kubeconfig for the runner.
+# removes Invitro's unused serverless components, overlays the monitoring stack
+# and writes a namespaced kubeconfig for the runner.
 set -euo pipefail
 
 namespace=aries
@@ -17,6 +18,7 @@ monitoring_release=prometheus
 monitoring_namespace=monitoring
 runner_kubeconfig=""
 account=aries
+prune=false
 
 usage() {
   cat <<'USAGE'
@@ -29,6 +31,8 @@ Usage: k8s/apply-aries.sh [options]
   --monitoring-namespace NS  that release's namespace (default: monitoring)
   --runner-kubeconfig PATH   write a kubeconfig limited to the ARIES namespace
   --runner-account NAME      the chart's runner ServiceAccount (default: aries)
+  --prune-invitro            first remove Knative, Istio, MetalLB and the other
+                             Invitro components ARIES does not use
   -h, --help                 show this help
 USAGE
 }
@@ -42,6 +46,7 @@ while [ $# -gt 0 ]; do
     --monitoring-namespace) monitoring_namespace=$2; shift 2 ;;
     --runner-kubeconfig) runner_kubeconfig=$2; shift 2 ;;
     --runner-account) account=$2; shift 2 ;;
+    --prune-invitro) prune=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -54,6 +59,10 @@ for tool in kubectl helm; do
 done
 kubectl auth can-i create namespaces >/dev/null 2>&1 ||
   { echo "kubectl must reach the cluster as an admin; the chart creates a namespace and Roles" >&2; exit 1; }
+
+if [ "$prune" = true ]; then
+  "$here/prune-invitro.sh" --monitoring-namespace "$monitoring_namespace"
+fi
 
 echo "==> Installing the ARIES chart as $namespace/$release"
 helm upgrade --install "$release" "$here/aries" \

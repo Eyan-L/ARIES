@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint integration run setup k8s-cluster k8s-images k8s-clean charts-lint charts-template
+.PHONY: build test test-race lint integration run setup k8s-cluster k8s-images k8s-clean k8s-prune charts-lint charts-template
 
 PROFILE ?= profiles/openclaw-tb2-fix-git-deepseek.json
 
@@ -77,6 +77,13 @@ NAMESPACE ?= aries
 k8s-clean:
 	kubectl -n $(NAMESPACE) delete pods,services,networkpolicies \
 	  -l app.kubernetes.io/managed-by=aries --ignore-not-found --wait
+
+# Remove what Invitro installs for its serverless experiments and ARIES does not
+# use: Knative, Istio, MetalLB, vHive's registry and the pushgateway. Needs
+# cluster-admin access. K8S_PRUNE_FLAGS="--dry-run" lists it without changing it.
+#   make k8s-prune K8S_PRUNE_FLAGS="--dry-run"
+k8s-prune:
+	./k8s/prune-invitro.sh $(K8S_PRUNE_FLAGS)
 
 # Render the chart without a cluster. Catches template errors and, with
 # --dry-run, schema problems that only show up once values are merged.
