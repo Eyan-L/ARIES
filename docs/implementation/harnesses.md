@@ -4,35 +4,6 @@ These mechanisms implement the [AgentHarness contract](../design/harness.md).
 Supported modes and image pins are listed in [supported components](../supported.md);
 voice setup remains in the [voice guide](../voice_mode.md).
 
-## DeepSeek Harness (DSH)
-
-[`dsh.Manager`](../../pkg/harness/dsh/harness.go) composes the shared harness runtime
-and sends the benchmark instruction unchanged on stdin to one native headless
-invocation. Completion requires exit zero, a final root turn ending as
-`completed`, a `final` event whose text is not blank, and no pending root tool calls.
-
-The native `fs-ssh`, `subprocess-ssh` and `sandbox-ssh` providers replace their
-local counterparts. The matching helper runs under `/tmp/aries-dsh-runtime`
-inside the borrowed task sandbox, outside the task workdir. The paired `dsh-ssh`
-bridge forwards native control and Unix socket streams into that exact sandbox.
-Headless admission waits for the remote execution services to activate.
-
-Model credentials, generated HOME/config, sessions and CLI profile state stay
-under `/run/aries/dsh` in the separate harness container. OpenSSH reads
-`/root/.ssh/config` independently of `HOME`; its known-hosts file contains the
-run bridge's scanned public key. Stop uses shared ownership and cleanup gates.
-
-Private artifacts retain instruction, configuration, headless events, stderr,
-timing and native root/child sessions. Persistence uses `compression: none`
-for readable, redacted JSONL. Full tool calls and request context are in the
-sessions; headless events are a bounded projection. SSH audit records describe
-transport operations and mark truncated input prefixes explicitly.
-CLI stdout/stderr and each session file are capped at 16 MiB; the complete
-session archive is capped at 64 MiB, including metadata and skipped entries.
-Exceeding a bound fails the harness with an evidence error and preserves
-already-collected artifacts. CLI output overflow also terminates that exec
-through deployment's existing cancellation path.
-
 ## OpenClaw Gateway and voice
 
 OpenClaw container lifecycle, gateway protocol, and voice-session semantics are
@@ -193,6 +164,54 @@ API request, which Hermes's session export does not record. The spans do not
 reach bridge execs: Hermes passes no trace context over SSH, so execs are
 attributed to a tool call by time only (the bridge record's `timestamp` is the
 exec's end), and background work is not linked.
+
+## DeepSeek Harness (DSH)
+
+DSH is the third supported harness and runs the released headless CLI in a
+local image built from the pinned Node base with DSH and its native SSH
+providers installed. The base image and package version come from `dsh.image`
+and `dsh.version` in `configs/versions.json`. It supports text-agent mode and
+native subagents.
+
+[`dsh.Manager`](../../pkg/harness/dsh/harness.go) composes the shared
+`harness.Runtime` and sends the benchmark instruction unchanged on stdin to one
+native headless invocation per task occurrence. The rendered configuration
+requires the native filesystem, subprocess, shell and code-execution services
+to activate before the benchmark turn starts.
+
+The native `fs-ssh`, `subprocess-ssh` and `sandbox-ssh` providers replace their
+local counterparts. ARIES installs Node.js and DSH's helper programs under
+`/tmp/aries-dsh-runtime` inside the task sandbox, outside the task workdir.
+The paired `dsh-ssh` bridge forwards native control and Unix socket streams
+into that exact sandbox; commands and file operations execute there. See the
+[DSH SSH bridge](ssh-bridges.md#dsh-ssh-bridge) for the transport details.
+
+The native sandbox policy is `danger-full-access` with approvals disabled;
+ARIES's separate task container provides filesystem and process isolation.
+
+Each task has a private HOME, configuration, CLI profile state and session
+directory under `/run/aries/dsh` in the separate harness container. The model
+key is staged separately and exported by the launcher. OpenSSH reads
+`/root/.ssh/config` independently of `HOME`; its known-hosts file contains the
+run bridge's scanned public key. No client key or password is used.
+
+Completion requires exit zero, a final root turn ending as `completed` without
+truncation, a `final` event whose text is not blank, and no pending root tool
+calls. An earlier completed turn does not establish completion for a later
+turn. Stop uses the shared runtime's ownership and cleanup gates.
+
+Private artifacts retain `config.json`, `instruction.txt`, `events.jsonl`,
+`stderr.log`, timing in `outcome.json`, and native root/child JSONL files under
+`sessions/`. Persistence uses `compression: none` for readable, redacted
+sessions. Full tool calls and request context are in those sessions; headless
+events are a bounded projection. SSH audit records describe transport
+operations and mark truncated input prefixes explicitly.
+
+CLI stdout/stderr and each session file are capped at 16 MiB; the complete
+session archive is capped at 64 MiB, including metadata and skipped entries.
+Exceeding a bound fails the harness with an evidence error and preserves
+already-collected artifacts. CLI output overflow also terminates that exec
+through deployment's existing cancellation path.
 
 ## Model Context Protocol (`MCP`)
 

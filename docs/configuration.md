@@ -691,26 +691,82 @@ file also bounds the wall-clock wait for the run.
 
 ### DeepSeek Harness (DSH)
 
-Use `harness.type: "dsh"` with `bridge.type: "dsh-ssh"` and the example
-[dsh-tb2-fix-git-deepseek.json](../profiles/dsh-tb2-fix-git-deepseek.json).
-Preparation builds the native CLI and matching helper providers using
-`dsh.image` (Node base) and `dsh.version` from the version catalog. It then builds
-the DSH bridge from that derived image with a matching tag, including the native
-helper runtime. The standard bridge image built by `make bridge-image` does not
-contain DSH's helper runtime.
+The [DSH profile](../profiles/dsh-tb2-fix-git-deepseek.json) uses the same
+[DeepSeek credential setup](#external-deepseek):
 
-DSH accepts `model.context_length`, `model.max_tokens`, and native DeepSeek
-`model.reasoning_effort` (`off`/`none`, `low`, `high`, `max`). For local models,
-use external `openai` or `sglang` with a Docker-reachable `/v1` endpoint and a
-matching model ID. The native DeepSeek adapter uses Messages: official roots
-map to `/anthropic`; custom DeepSeek endpoints must name a Messages API root.
+```sh
+./bin/aries setup profiles/dsh-tb2-fix-git-deepseek.json
+./bin/aries profiles/dsh-tb2-fix-git-deepseek.json
+```
+
+DSH supports text-agent mode and native subagents. It is paired with
+`bridge.type: "dsh-ssh"`; a crossed harness/bridge pair is rejected before
+execution. The task image must provide Linux glibc, `sh`, `tar`, and Bash.
+
+Preparation installs the released DSH CLI and matching SSH providers at
+`dsh.version` on the Node.js base named by `dsh.image` in the version catalog.
+It then builds the DSH bridge image by adding ARIES's SSH server to that DSH
+image. DSH's native tools also need a helper program inside the task container
+to run commands and access files. The DSH bridge image carries an archive of
+Node.js, the helper, and its JavaScript dependencies, which the bridge installs
+in each task container. The standard `make bridge-image` build only adds the
+SSH server and does not prepare this archive; DSH setup builds the image with
+both components.
 
 `harness.subagents.enabled` defaults to true; false removes delegation tools.
-Voice, search/extract, MCP, compaction, explicit temperature, generic model
-reasoning effort and `max_concurrent` overrides are unsupported. The native
-sandbox uses `danger-full-access` with approvals disabled; ARIES's separate
-task container supplies isolation. See the [implementation](implementation/harnesses.md#deepseek-harness-dsh)
-for private state and trajectory formats.
+`model.context_length` and `model.max_tokens` override DSH's model metadata;
+choose values supported by the served model. With the native DeepSeek provider,
+`model.reasoning_effort` accepts `off`/`none`, `low`, `high`, or `max`.
+Omitting these model settings preserves DSH's native defaults.
+
+The following fragment illustrates the supported settings. Merge these fields
+into the example profile rather than replacing the entire profile.
+
+```json
+{
+  "harness": {
+    "type": "dsh",
+    "subagents": {
+      "enabled": true
+    }
+  },
+  "bridge": {
+    "type": "dsh-ssh"
+  },
+  "runtime": {
+    "backend": "deepseek",
+    "mode": "external"
+  },
+  "model": {
+    "base_url": "https://api.deepseek.com",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "id": "deepseek-flash",
+    "context_length": 262144,
+    "max_tokens": 32768,
+    "reasoning_effort": "high"
+  }
+}
+```
+
+With `runtime.backend: "deepseek"`, DSH uses DeepSeek's Anthropic-compatible
+Messages API. ARIES converts `model.base_url` values `https://api.deepseek.com`
+and `https://api.deepseek.com/v1` to `https://api.deepseek.com/anthropic` in
+DSH's configuration. DSH then sends requests to
+`https://api.deepseek.com/anthropic/v1/messages`, using the DeepSeek model and
+API key. Custom DeepSeek base URLs are passed through unchanged and must
+support the Messages API: for example, `https://proxy.example/anthropic`
+must serve `POST /anthropic/v1/messages`.
+
+For an OpenAI-compatible local model server, use `runtime.backend: "openai"`
+or `"sglang"` with `runtime.mode: "external"`. Set `model.base_url` to a
+Docker-reachable `/v1` endpoint and `model.id` to the server's model ID. Omit
+`model.reasoning_effort`, which this DSH integration supports only for DeepSeek.
+
+Artifacts land under `<run>/<task>/harness/`: the redacted `config.json`,
+headless output in `events.jsonl`, `stderr.log`, timing in `outcome.json`, and
+native root/child trajectories under `sessions/`. See the
+[implementation](implementation/harnesses.md#deepseek-harness-dsh) for private
+state, task-container isolation and evidence limits.
 
 ### Realtime OpenClaw mode
 

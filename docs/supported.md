@@ -43,14 +43,14 @@ guides above.
 
 - DSH supports agent mode and native subagents. Its helper requires Linux glibc,
   `sh`, `tar`, and Bash; Alpine/musl images are unsupported. The task workdir must
-  neither contain nor be inside `/tmp/aries-dsh-runtime`. Unsupported profile
-  settings are listed in [DSH configuration](configuration.md#deepseek-harness-dsh).
+  neither contain nor be inside `/tmp/aries-dsh-runtime`. See
+  [DSH configuration](configuration.md#deepseek-harness-dsh) for supported profile settings.
 - Each SSH bridge supports its corresponding harness. Crossed pairs are rejected
   before execution. Hermes requires `/bin/bash` in the task image; its bridge
   rejects Hermes's private `~/.hermes` file synchronization. OpenClaw requires
   `bin/aries-ssh-client` beside `bin/aries`. OpenClaw and Hermes use the standard
   Docker bridge image (`make bridge-image`). DSH preparation builds a separate
-  bridge image from its derived DSH image, including the native helper runtime;
+  bridge image containing ARIES's SSH server and DSH's helper archive;
   see [DSH configuration](configuration.md#deepseek-harness-dsh).
 - Realtime mode is OpenClaw-only and needs a separate TTS credential. See the
   [realtime setup](configuration.md#realtime-openclaw-mode).
